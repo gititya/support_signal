@@ -1,0 +1,4 @@
+anthropic
+pandas
+jinja2
+python-dotenv
