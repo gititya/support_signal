@@ -1,0 +1,36 @@
+# Classification config for TransUnion
+# These definitions apply across all sources (CFPB, support tickets, app reviews, etc.).
+# Another company may use different categories, definitions, or examples — edit that company's file.
+
+company: TransUnion
+
+categories:
+  Defect:
+    definition: a system or process is malfunctioning
+    recommended_audience: Engineering
+    examples:
+      - dispute submitted but never processed
+      - data corrected then re-appears incorrectly
+
+  UX Friction:
+    definition: the system works but the experience is confusing or frustrating
+    recommended_audience: Design
+    examples:
+      - unclear dispute status
+      - hard-to-navigate portal
+      - poor error messages
+
+  Knowledge Gap:
+    definition: the product works correctly but users misunderstand how it works
+    recommended_audience: PM
+    examples:
+      - users don't know disputes take 30 days
+      - users don't understand score calculation
+
+  Monetization Opportunity:
+    definition: users want a feature or service that doesn't exist
+    recommended_audience: Growth
+    examples:
+      - requesting real-time alerts
+      - credit coaching
+      - faster dispute tracking

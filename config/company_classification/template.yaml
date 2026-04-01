@@ -1,0 +1,20 @@
+# Classification config template
+# Copy this file, rename it to <company_slug>.yaml, and fill in company-specific values.
+# These definitions apply across all sources for a given company (CFPB, support, app reviews, etc.).
+# A different company may use different categories, different definitions, or a different number of categories.
+
+company: "<Company Name>"
+
+# List the signal type categories this company uses.
+# Remove or add categories as appropriate — not all companies need all four.
+categories:
+  "<Category Name>":
+    definition: "<one-line definition of what qualifies as this type>"
+    examples:
+      - "<example complaint pattern>"
+      - "<example complaint pattern>"
+
+  "<Category Name>":
+    definition: "<one-line definition>"
+    examples:
+      - "<example>"

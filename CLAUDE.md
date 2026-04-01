@@ -22,7 +22,7 @@ python test_cluster.py   # or any test_*.py in project root
 signal.py          ← CLI entry point, wires all modules
 src/
   ingest.py        ← Load CSV → filter company → keyword match → cap at 2,000 rows
-  cluster.py       ← Batch clustering via Sonnet → hierarchical consolidation
+  cluster.py       ← Batch clustering via Sonnet → names-only single-pass consolidation (15 themes)
   classify.py      ← Signal type classification via Haiku (runs AFTER clustering)
   score.py         ← Heuristic severity scoring, no LLM
   narrate.py       ← Exec summary + recommended action via Sonnet → render Jinja2 brief
@@ -57,17 +57,5 @@ Never state root causes as facts.
 
 ---
 
-## ⚠ Known limitation: LLM consolidation token ceiling
-
-**What happened:** On 2026-03-27, clustering 2,000 complaints across 20 batches of 100 produced 214 raw clusters. Sending all 214 to a single consolidation call exceeded the model's output token limit (even at max_tokens=8096), truncating the JSON mid-stream and crashing the parser. This cost $4 and 1.5 hours.
-
-**Root cause:** Each cluster in the consolidation output costs ~400 tokens. With 214 input clusters, the model's attempt to produce ~50 output clusters easily blows past 8096 tokens.
-
-**Guardrail in place (`cluster.py`):**
-- `MAX_CLUSTERS_PER_CONSOLIDATION = 30` — hard limit per consolidation call
-- `stop_reason == "max_tokens"` check in `_call_model` — raises a descriptive error immediately instead of silently passing broken JSON to `json.loads`
-- `_consolidate()` automatically uses hierarchical consolidation when cluster count exceeds the limit: splits into sub-groups → consolidates each → final pass
-
-**Rule for future work:** Never send more than 30 clusters to a single consolidation call. If you change `BATCH_SIZE` or the clustering prompt produces more clusters per batch, check the math: `(2000 / BATCH_SIZE) × avg_clusters_per_batch` must stay ≤ 30 for single-pass consolidation, or hierarchical kicks in automatically.
-
-**Batch caching:** `cluster.py` caches batch results to `/tmp/signal_batch_cache/` keyed by pattern + complaint count + model. If consolidation fails, reruns skip the expensive batch phase.
+## Incidents and architectural decisions
+See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix).

@@ -1,28 +1,15 @@
 # Signal — Session State
 
-## 🔴 BEFORE ANYTHING ELSE: Two blockers to resolve in order
+## ✅ Blockers resolved (2026-03-27)
 
-### 1. Fix billing
-API calls are failing with "credit balance too low" even though balance shows $7.06 at platform.claude.com/settings/billing. This was unresolved at end of last session. **Verify this works first by running:**
-```bash
-cd /Users/aditya/Documents/Projects/signal
-source ~/.zshrc
-python test_key.py
-```
-If it still fails — contact Anthropic support before spending any more time.
+### Billing — resolved
+Topped up. API calls working.
 
-### 2. Re-run the 20 batches (Step 3 — cluster.py)
-The batch cache in `.batch_cache/` is empty — it was cleared before it could be saved. Once billing is confirmed working, re-run the cluster step:
-```bash
-python test_cluster.py
-```
-This will:
-- Run 20 batches of ~100 complaints each (~45 mins, ~$2)
-- Cache results to `.batch_cache/` (permanent this time)
-- Run hierarchical consolidation automatically
-- Print cluster names + first hypothesis of largest cluster
-
-**Only proceed to Step 4 after this completes successfully.**
+### Step 3 — cluster.py consolidation — resolved after 3 failures (~$10+ spent)
+**What failed:** Recursive hierarchical consolidation. The model never reduced cluster count enough per pass (216→131→103), causing infinite looping and eventual max_tokens failures.
+**What was done:** Replaced recursive consolidation with a single names-only call. Strips input to `name + description[:80]`, asks for EXACTLY 15 output clusters. Output bounded at ~3k tokens — can never hit max_tokens. See memory for full incident log.
+**Deviation from plan:** Hypotheses are regenerated fresh in the consolidation call rather than preserved from batch output. Minor quality tradeoff, functionally equivalent.
+**Batch cache:** 20 batches / 216 clusters cached at `.batch_cache/batches_511254be1c14.json` — intact.
 
 ---
 
@@ -33,16 +20,23 @@ This will:
 |------|------|--------|
 | 1 | File structure + requirements.txt | ✅ Done |
 | 2 | src/ingest.py | ✅ Done + verified |
-| 3 | src/cluster.py | ✅ Code done — needs verified run |
-| 4 | src/classify.py | ⏳ Next |
+| 3 | src/cluster.py | ✅ Done + verified (cluster_id fix applied) |
+| 4 | src/classify.py | ✅ Done + verified |
 | 5 | src/score.py | ⏳ Pending |
 | 6 | templates/brief_pm.md.j2 | ⏳ Pending |
 | 7 | src/narrate.py | ⏳ Pending |
 | 8 | signal.py | ⏳ Pending |
 
-## Next step after blockers resolved
-**Step 4 — src/classify.py**
-Classify each cluster by signal type (Defect / UX Friction / Knowledge Gap / Monetization Opportunity) using Haiku. Runs AFTER clustering output is confirmed. See plan at `/Users/aditya/.claude/plans/jazzy-gathering-gosling.md` for full spec.
+## Current status (2026-04-01)
+Steps 1–4 complete. 15 themes produced from 2,000 TransUnion complaints, classified by signal type and exported to `output/theme_eval.csv`.
+
+**In progress:** Manual evaluation of theme quality — verifying theme names, signal types, and classification rationale against complaint narratives.
+
+**Pending confirmation before proceeding:**
+- [ ] Quality of `output/theme_eval.csv` confirmed acceptable
+- [ ] Delete `run_cluster_live.py` and `run_classify_live.py` (scratch scripts, no longer needed once quality is confirmed)
+
+**Next step (after quality confirmed):** Step 5 — `src/score.py` (heuristic severity scoring, no LLM)
 
 ## Key constraints (never violate)
 - Classification runs AFTER clustering — never before
