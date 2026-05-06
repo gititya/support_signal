@@ -43,3 +43,17 @@ Steps 1–4 complete. 15 themes produced from 2,000 TransUnion complaints, class
 - Root-cause hypotheses always start with "This may indicate", "Evidence suggests", or "This pattern is consistent with"
 - Model constants at top of each file
 - Phase 1 confidence always "Directional (single source)"
+
+---
+
+## Claude Code handoff — taxonomy redesign (2026-05-06)
+
+Tell Claude Code:
+
+Codex implemented the Signal taxonomy redesign on branch `codex-signal-taxonomy-redesign`. The new architecture is buckets first, signals second: CFPB `Issue` + `Sub-issue` now deterministically assigns complaints into curated TransUnion evidence buckets, then Sonnet synthesizes PM-facing signals and root-cause hypotheses from narratives inside each populated bucket. CFPB buckets are grounding metadata, not the final product insight.
+
+Durable context to preserve:
+- Do not return to free-form LLM theme assignment as the default; keep it only as legacy/debug comparison.
+- Do not use LLM fallback assignment for unmatched rows; unknown combos go to `Other/Unclassified`.
+- The new review export path is `output/theme_eval_taxonomy_signals.csv`, so the existing `output/theme_eval.csv` and `output/theme_eval - myfirstfeedback.csv` are not overwritten by the taxonomy/signal run.
+- `AGENTS.md` is now the Codex context file and includes the revised taxonomy state.
