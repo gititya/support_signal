@@ -1,5 +1,5 @@
-anthropic
-pandas
-jinja2
-python-dotenv
-pyyaml
+anthropic>=0.104.1
+pandas>=3.0.3
+jinja2>=3.1.6
+python-dotenv>=1.2.2
+pyyaml>=6.0.3
