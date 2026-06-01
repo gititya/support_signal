@@ -100,7 +100,12 @@ evidence_buckets:
         sub_issue: Billing dispute for services
     complaint_count: 86
 
+  - name: Cross-Bureau Inconsistent Reporting
+    description: Consumer says the same account, status, balance, public record, or personal identifier is reported differently across credit bureaus, and uses that inconsistency as evidence that TransUnion's reporting is inaccurate.
+    source_combos: []
+    complaint_count: null
+
 other_bucket:
   name: Other/Unclassified
-  description: CFPB Issue/Sub-issue combinations not mapped to a curated TransUnion evidence bucket.
+  description: Complaints that do not fit the curated evidence buckets after reading the narrative and CFPB metadata.
   source_combos: []

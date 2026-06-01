@@ -59,3 +59,6 @@ Never state root causes as facts.
 
 ## Incidents and architectural decisions
 See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix).
+
+## Install safety
+See global CLAUDE.md and shared_context.md for NPM install safety rules.

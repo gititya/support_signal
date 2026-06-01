@@ -64,7 +64,9 @@ Do not implement the original hybrid plan as written. The active direction is:
 - Use CFPB `Issue` + `Sub-issue` as the evidence-bucket grounding layer, not as the final product insight.
 - Mine taxonomy from the full TransUnion company dataset, not only the current pattern-filtered subset.
 - Require a curated company-level taxonomy file; do not silently fall back to free clustering when it is missing.
-- Assign complaints by exact taxonomy lookup only. Put unmatched complaints in `Other/Unclassified`; do not send unmatched rows to an LLM to choose the closest bucket.
+- Assign complaints to curated evidence buckets using narrative-first model classification. CFPB `Issue` + `Sub-issue` is a hint, not the source of truth, because CFPB rows can be misfiled.
+- Do not let the model invent buckets. It must choose from the curated taxonomy plus `Other/Unclassified`.
+- Use row-level assignment rationales so incorrect bucket placement is auditable in `output/theme_eval_taxonomy_signals.csv`.
 - Generate PM-facing signals from narratives inside each populated evidence bucket. Signals must be more useful than raw CFPB labels.
 - Keep LLM value focused on signal synthesis and hypothesis generation after deterministic bucket assignment.
 - Keep classification after evidence assembly and signal synthesis.
@@ -75,3 +77,6 @@ Read-only validation on 2026-05-06 confirmed the CFPB taxonomy is strong enough 
 
 ## Incidents and architectural decisions
 See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix).
+
+## Install safety
+See global AGENTS.md and shared_context.md for NPM install safety rules.

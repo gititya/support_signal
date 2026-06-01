@@ -13,6 +13,12 @@ BATCH_SIZE = 100
 SNIPPET_LEN = 500
 DESCRIPTION_SNIPPET_LEN = 140
 SIGNAL_SAMPLE_SIZE = 8
+ASSIGNMENT_BATCH_SIZE = 50
+DISALLOWED_SIGNAL_NAME_TERMS = (
+    "repeated",
+    "persistent",
+    "multiple cycles",
+)
 OVER_AGGREGATION_WARN_THRESHOLD = 0.5
 HYPOTHESIS_PREFIXES = (
     "This may indicate",
@@ -70,7 +76,7 @@ def load_taxonomy(path: Path) -> dict:
     normalized_buckets = []
     combo_to_bucket = {}
     for bucket_idx, bucket in enumerate(buckets):
-        normalized = _validate_taxonomy_bucket(bucket, bucket_idx)
+        normalized = _validate_taxonomy_bucket(bucket, bucket_idx, require_combos=False)
         for combo in normalized["source_combos"]:
             key = _combo_key(combo["issue"], combo["sub_issue"])
             if key in combo_to_bucket:
@@ -307,12 +313,84 @@ def _sample_bucket_indices(indices: list[int], limit: int = SIGNAL_SAMPLE_SIZE) 
     return [indices[round(i * step)] for i in range(limit)]
 
 
+def _make_bucket_assignment_prompt(pattern: str, snippets: list[dict], taxonomy: dict) -> str:
+    buckets = [
+        {
+            "bucket_index": i,
+            "name": bucket["name"],
+            "description": bucket["description"],
+            "source_combos": bucket["source_combos"],
+        }
+        for i, bucket in enumerate(taxonomy["evidence_buckets"])
+    ]
+    return (
+        f"You are assigning consumer complaints to fixed evidence buckets for a PM-facing "
+        f"signal intelligence workflow.\n\n"
+        f"User-described support pattern: \"{pattern}\"\n\n"
+        f"Use the complaint narrative as the source of truth. CFPB Issue/Sub-issue metadata is "
+        f"only a hint and may be wrong or overly broad. If the narrative conflicts with the CFPB "
+        f"metadata, follow the narrative.\n\n"
+        f"Fixed evidence buckets:\n{json.dumps(buckets, indent=2)}\n\n"
+        f"Complaints to assign:\n{json.dumps(snippets, indent=2)}\n\n"
+        f"Rules:\n"
+        f"- Assign each complaint to exactly one bucket_index from the fixed list.\n"
+        f"- Do not invent buckets.\n"
+        f"- Use Other/Unclassified only when no curated bucket fits the narrative.\n"
+        f"- Cross-bureau inconsistencies should go to Cross-Bureau Inconsistent Reporting, "
+        f"even if the CFPB issue says Improper Report Use.\n"
+        f"- Identity theft packets, FTC reports, fraud alerts, or blocked fraudulent accounts "
+        f"should go to Fraud Alert or Security Freeze Problems.\n"
+        f"- Unauthorized access, permissible purpose, hard inquiries, or report access/use "
+        f"should go to Improper Report Use.\n\n"
+        f"Return ONLY valid JSON — an array of {len(snippets)} objects:\n"
+        f"[\n"
+        f"  {{\"idx\": 0, \"bucket_index\": 3, \"assignment_rationale\": \"short reason\"}}\n"
+        f"]\n"
+        f"No markdown fences, no commentary — raw JSON only."
+    )
+
+
+def _validate_bucket_assignments(
+    result: list[dict],
+    expected_indices: list[int],
+    n_buckets: int,
+) -> dict[int, dict]:
+    if not isinstance(result, list):
+        raise ValueError("Bucket assignment output must be a JSON array.")
+
+    expected_set = set(expected_indices)
+    assignments = {}
+    for item in result:
+        idx = item.get("idx")
+        bucket_index = item.get("bucket_index")
+        rationale = item.get("assignment_rationale")
+        if not isinstance(idx, int) or idx not in expected_set:
+            raise ValueError(f"Bucket assignment contains invalid idx: {idx!r}")
+        if idx in assignments:
+            raise ValueError(f"Bucket assignment contains duplicate idx: {idx!r}")
+        if not isinstance(bucket_index, int) or not (0 <= bucket_index < n_buckets):
+            raise ValueError(f"Bucket assignment for idx {idx!r} has invalid bucket_index: {bucket_index!r}")
+        if not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError(f"Bucket assignment for idx {idx!r} is missing assignment_rationale.")
+        assignments[idx] = {
+            "bucket_index": bucket_index,
+            "assignment_rationale": rationale.strip(),
+        }
+
+    missing = sorted(expected_set - set(assignments))
+    if missing:
+        raise ValueError(f"Bucket assignment omitted complaint indices: {missing}")
+    return assignments
+
+
 def _make_signal_synthesis_prompt(
     pattern: str,
     evidence_bucket: dict,
     snippets: list[dict],
     bucket_count: int,
+    retry_feedback: str = "",
 ) -> str:
+    retry_block = f"\nPrevious output problem to fix: {retry_feedback}\n" if retry_feedback else ""
     return (
         f"You are translating grounded complaint evidence into one PM-facing product signal.\n\n"
         f"User-described support pattern: \"{pattern}\"\n\n"
@@ -324,12 +402,21 @@ def _make_signal_synthesis_prompt(
         f"Create a product signal that is more useful than the CFPB bucket label. "
         f"Do not simply repeat or lightly rename the evidence bucket. "
         f"Focus on what a PM should understand about the user problem, workflow failure, "
-        f"or trust breakdown in the narratives.\n\n"
+        f"or trust breakdown in the narratives.\n"
+        f"The signal must preserve what is distinct about this evidence bucket. "
+        f"Do not flatten every bucket into the same generic dispute-loop story. "
+        f"If the sampled narratives do not clearly support the bucket label, say that the "
+        f"source category appears noisy or misfiled in the bucket_distinction field.\n"
+        f"Do not use words like repeated, persistent, or multiple cycles in the signal_name "
+        f"unless the sampled excerpts explicitly show repeat behavior. Prefer neutral wording "
+        f"like unresolved, uncorrected, ignored, opaque, or missing follow-through.\n"
+        f"{retry_block}\n"
         f"Return ONLY valid JSON — an array with exactly one signal object:\n"
         f"[\n"
         f"  {{\n"
         f"    \"signal_name\": \"short PM-facing signal name\",\n"
         f"    \"signal_description\": \"1-2 sentence explanation of what users are experiencing\",\n"
+        f"    \"bucket_distinction\": \"one sentence explaining what is distinct about this evidence bucket versus the other buckets\",\n"
         f"    \"supporting_indices\": [0, 3, 7],\n"
         f"    \"root_cause_hypotheses\": [\"This may indicate...\", \"Evidence suggests...\"]\n"
         f"  }}\n"
@@ -350,6 +437,7 @@ def _validate_signal_synthesis(result: list[dict], evidence_bucket: dict, sample
     signal = result[0]
     signal_name = signal.get("signal_name")
     signal_description = signal.get("signal_description")
+    bucket_distinction = signal.get("bucket_distinction")
     supporting_indices = signal.get("supporting_indices")
     hypotheses = signal.get("root_cause_hypotheses")
 
@@ -359,8 +447,16 @@ def _validate_signal_synthesis(result: list[dict], evidence_bucket: dict, sample
         raise ValueError(
             f"Signal name must not be identical to evidence bucket name: {signal_name!r}"
         )
+    signal_name_lower = signal_name.strip().lower()
+    for term in DISALLOWED_SIGNAL_NAME_TERMS:
+        if term in signal_name_lower:
+            raise ValueError(
+                f"Signal name contains unsupported qualifier {term!r}: {signal_name!r}"
+            )
     if not isinstance(signal_description, str) or not signal_description.strip():
         raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' is missing signal_description.")
+    if not isinstance(bucket_distinction, str) or not bucket_distinction.strip():
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' is missing bucket_distinction.")
     if not isinstance(supporting_indices, list) or not supporting_indices:
         raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' must include supporting_indices.")
 
@@ -384,6 +480,7 @@ def _validate_signal_synthesis(result: list[dict], evidence_bucket: dict, sample
     return {
         "signal_name": signal_name.strip(),
         "signal_description": signal_description.strip(),
+        "bucket_distinction": bucket_distinction.strip(),
         "supporting_indices": sorted(set(supporting_indices)),
         "root_cause_hypotheses": hypotheses,
     }
@@ -412,6 +509,61 @@ def _assign_evidence_buckets(df, taxonomy: dict) -> list[dict]:
     return buckets
 
 
+def _assign_evidence_buckets_with_model(
+    pattern: str,
+    df,
+    taxonomy: dict,
+    client: anthropic.Anthropic,
+) -> list[dict]:
+    buckets = [
+        {
+            **bucket,
+            "complaint_indices": [],
+            "assignment_rationales": {},
+        }
+        for bucket in taxonomy["evidence_buckets"]
+    ]
+    narratives = df["Consumer complaint narrative"].tolist()
+    snippets = [
+        {
+            "idx": idx,
+            "cfpb_issue": _normalize_combo_value(row.get("Issue")),
+            "cfpb_sub_issue": _normalize_combo_value(row.get("Sub-issue")),
+            "text": str(narratives[idx])[:SNIPPET_LEN],
+        }
+        for idx, (_, row) in enumerate(df.iterrows())
+    ]
+    batches = [
+        snippets[i:i + ASSIGNMENT_BATCH_SIZE]
+        for i in range(0, len(snippets), ASSIGNMENT_BATCH_SIZE)
+    ]
+
+    print(
+        f"  Assigning {len(df):,} complaints into evidence buckets via narrative-first "
+        f"{CLUSTER_MODEL} classification..."
+    )
+    for batch_idx, batch in enumerate(batches):
+        print(f"    Assignment batch {batch_idx + 1}/{len(batches)}...")
+        prompt = _make_bucket_assignment_prompt(pattern, batch, taxonomy)
+        result = _call_model(prompt, client, max_tokens=4096)
+        expected_indices = [item["idx"] for item in batch]
+        assignments = _validate_bucket_assignments(
+            result,
+            expected_indices,
+            len(taxonomy["evidence_buckets"]),
+        )
+        for idx, assignment in assignments.items():
+            bucket_idx = assignment["bucket_index"]
+            buckets[bucket_idx]["complaint_indices"].append(idx)
+            buckets[bucket_idx]["assignment_rationales"][idx] = assignment["assignment_rationale"]
+
+    assigned_count = sum(len(bucket["complaint_indices"]) for bucket in buckets)
+    if assigned_count != len(df):
+        raise ValueError("Model evidence bucket assignment did not preserve complaint coverage.")
+
+    return buckets
+
+
 def _cluster_with_taxonomy(
     pattern: str,
     df,
@@ -424,7 +576,7 @@ def _cluster_with_taxonomy(
             raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
         client = anthropic.Anthropic(api_key=api_key)
 
-    buckets = _assign_evidence_buckets(df, taxonomy)
+    buckets = _assign_evidence_buckets_with_model(pattern, df, taxonomy, client)
     populated_buckets = [
         bucket for bucket in buckets
         if bucket["complaint_indices"]
@@ -432,10 +584,9 @@ def _cluster_with_taxonomy(
     populated_buckets.sort(key=lambda bucket: len(bucket["complaint_indices"]), reverse=True)
 
     print(
-        f"  Assigning {len(df):,} complaints into {len(populated_buckets)} "
-        f"evidence buckets via CFPB Issue/Sub-issue..."
+        f"  Synthesizing PM-facing signals for {len(populated_buckets)} populated "
+        f"evidence buckets via {CLUSTER_MODEL}..."
     )
-    print(f"  Synthesizing PM-facing signals via {CLUSTER_MODEL}...")
 
     narratives = df["Consumer complaint narrative"].tolist()
     signals = []
@@ -460,15 +611,28 @@ def _cluster_with_taxonomy(
             len(complaint_indices),
         )
         result = _call_model(prompt, client, max_tokens=2048)
-        signal = _validate_signal_synthesis(result, bucket, sample_indices)
+        try:
+            signal = _validate_signal_synthesis(result, bucket, sample_indices)
+        except ValueError as first_err:
+            retry_prompt = _make_signal_synthesis_prompt(
+                pattern,
+                bucket,
+                snippets,
+                len(complaint_indices),
+                retry_feedback=str(first_err),
+            )
+            retry_result = _call_model(retry_prompt, client, max_tokens=2048)
+            signal = _validate_signal_synthesis(retry_result, bucket, sample_indices)
         signals.append({
             "name": signal["signal_name"],
             "description": signal["signal_description"],
             "signal_name": signal["signal_name"],
             "signal_description": signal["signal_description"],
+            "bucket_distinction": signal["bucket_distinction"],
             "evidence_bucket_name": bucket["name"],
             "evidence_bucket_description": bucket["description"],
             "evidence_bucket_source_combos": bucket["source_combos"],
+            "evidence_bucket_assignment_rationales": bucket.get("assignment_rationales", {}),
             "is_other_bucket": bucket.get("is_other", False),
             "complaint_indices": sorted(complaint_indices),
             "supporting_indices": signal["supporting_indices"],
