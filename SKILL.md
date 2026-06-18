@@ -1,3 +1,12 @@
+---
+status: "in-progress"
+current_phase: "Signal complaint clustering / PM brief work; taxonomy redesign branch needs review."
+next_action: "Review codex-signal-taxonomy-redesign outputs and check whether exports are stale."
+things_to_know:
+  - "Narrative complaint text should outrank metadata."
+  - "Generated CSV/output files can be stale even when tests pass."
+---
+
 # Signal — Session State
 
 ## ✅ Blockers resolved (2026-03-27)
@@ -57,3 +66,12 @@ Durable context to preserve:
 - Do not use LLM fallback assignment for unmatched rows; unknown combos go to `Other/Unclassified`.
 - The new review export path is `output/theme_eval_taxonomy_signals.csv`, so the existing `output/theme_eval.csv` and `output/theme_eval - myfirstfeedback.csv` are not overwritten by the taxonomy/signal run.
 - `AGENTS.md` is now the Codex context file and includes the revised taxonomy state.
+
+## Codex update — taxonomy assignment reliability (2026-06-18)
+
+Correction to the older handoff above: taxonomy evidence-bucket assignment is now narrative-first model classification against curated buckets, not deterministic CFPB combo assignment. CFPB `Issue` + `Sub-issue` remains grounding context only.
+
+Current stabilization work:
+- Row-level taxonomy assignments are cached under `.batch_cache/taxonomy_assignments_*.json` after every assignment batch, so a killed export can resume without paying for completed rows again.
+- `eval_bucket_golden.py` is the cheap pre-export gate for known hard cases before running the full `export_theme_eval.py`.
+- The taxonomy export still writes to `output/theme_eval_taxonomy_signals.csv` and does not overwrite `output/theme_eval.csv`.

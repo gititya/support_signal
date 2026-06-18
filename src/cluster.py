@@ -152,6 +152,32 @@ def _cache_key(pattern: str, total: int) -> str:
     return str(_CACHE_DIR / f"batches_{h}.json")
 
 
+def _taxonomy_assignment_cache_key(pattern: str, df, taxonomy: dict) -> str:
+    complaint_ids = []
+    if "Complaint ID" in df.columns:
+        complaint_ids = [
+            _normalize_combo_value(value)
+            for value in df["Complaint ID"].tolist()
+        ]
+    bucket_fingerprint = [
+        {
+            "name": bucket["name"],
+            "description": bucket["description"],
+        }
+        for bucket in taxonomy["evidence_buckets"]
+    ]
+    payload = {
+        "model": CLUSTER_MODEL,
+        "pattern": pattern,
+        "row_count": len(df),
+        "complaint_ids": complaint_ids,
+        "buckets": bucket_fingerprint,
+    }
+    raw = json.dumps(payload, sort_keys=True)
+    h = hashlib.md5(raw.encode()).hexdigest()[:12]
+    return str(_CACHE_DIR / f"taxonomy_assignments_{h}.json")
+
+
 def _load_cache(key: str):
     p = Path(key)
     if p.exists():
@@ -161,6 +187,47 @@ def _load_cache(key: str):
 
 def _save_cache(key: str, data):
     Path(key).write_text(json.dumps(data))
+
+
+def _load_assignment_cache(cache_key: str, total: int, n_buckets: int) -> dict[int, dict]:
+    cached = _load_cache(cache_key)
+    if not cached:
+        return {}
+    if not isinstance(cached, list):
+        raise ValueError("Taxonomy assignment cache must be a JSON array.")
+
+    assignments = {}
+    for item in cached:
+        idx = item.get("idx")
+        bucket_index = item.get("bucket_index")
+        rationale = item.get("assignment_rationale")
+        if not isinstance(idx, int) or not (0 <= idx < total):
+            raise ValueError(f"Taxonomy assignment cache contains invalid idx: {idx!r}")
+        if idx in assignments:
+            raise ValueError(f"Taxonomy assignment cache contains duplicate idx: {idx!r}")
+        if not isinstance(bucket_index, int) or not (0 <= bucket_index < n_buckets):
+            raise ValueError(
+                f"Taxonomy assignment cache for idx {idx!r} has invalid bucket_index: {bucket_index!r}"
+            )
+        if not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError(f"Taxonomy assignment cache for idx {idx!r} is missing rationale.")
+        assignments[idx] = {
+            "bucket_index": bucket_index,
+            "assignment_rationale": rationale.strip(),
+        }
+    return assignments
+
+
+def _save_assignment_cache(cache_key: str, assignments: dict[int, dict]) -> None:
+    rows = [
+        {
+            "idx": idx,
+            "bucket_index": assignment["bucket_index"],
+            "assignment_rationale": assignment["assignment_rationale"],
+        }
+        for idx, assignment in sorted(assignments.items())
+    ]
+    _save_cache(cache_key, rows)
 
 
 def _assign_cluster_ids(clusters: list[dict], batch_idx: int) -> list[dict]:
@@ -537,25 +604,71 @@ def _assign_evidence_buckets_with_model(
         snippets[i:i + ASSIGNMENT_BATCH_SIZE]
         for i in range(0, len(snippets), ASSIGNMENT_BATCH_SIZE)
     ]
+    cache_key = _taxonomy_assignment_cache_key(pattern, df, taxonomy)
+    assignments_by_idx = _load_assignment_cache(
+        cache_key,
+        len(df),
+        len(taxonomy["evidence_buckets"]),
+    )
 
     print(
         f"  Assigning {len(df):,} complaints into evidence buckets via narrative-first "
-        f"{CLUSTER_MODEL} classification..."
+        f"{CLUSTER_MODEL} classification...",
+        flush=True,
     )
+    if assignments_by_idx:
+        print(
+            f"  Loaded {len(assignments_by_idx):,}/{len(df):,} cached taxonomy assignments.",
+            flush=True,
+        )
     for batch_idx, batch in enumerate(batches):
-        print(f"    Assignment batch {batch_idx + 1}/{len(batches)}...")
-        prompt = _make_bucket_assignment_prompt(pattern, batch, taxonomy)
+        pending_batch = [
+            item for item in batch
+            if item["idx"] not in assignments_by_idx
+        ]
+        if not pending_batch:
+            print(
+                f"    Assignment batch {batch_idx + 1}/{len(batches)} already cached.",
+                flush=True,
+            )
+            continue
+
+        print(
+            f"    Assignment batch {batch_idx + 1}/{len(batches)} "
+            f"({len(pending_batch)} uncached complaints)...",
+            flush=True,
+        )
+        prompt = _make_bucket_assignment_prompt(pattern, pending_batch, taxonomy)
         result = _call_model(prompt, client, max_tokens=4096)
-        expected_indices = [item["idx"] for item in batch]
+        expected_indices = [item["idx"] for item in pending_batch]
         assignments = _validate_bucket_assignments(
             result,
             expected_indices,
             len(taxonomy["evidence_buckets"]),
         )
-        for idx, assignment in assignments.items():
-            bucket_idx = assignment["bucket_index"]
-            buckets[bucket_idx]["complaint_indices"].append(idx)
-            buckets[bucket_idx]["assignment_rationales"][idx] = assignment["assignment_rationale"]
+        assignments_by_idx.update(assignments)
+        _save_assignment_cache(cache_key, assignments_by_idx)
+        print(
+            f"    Cached {len(assignments_by_idx):,}/{len(df):,} taxonomy assignments.",
+            flush=True,
+        )
+
+    final_assignments = _validate_bucket_assignments(
+        [
+            {
+                "idx": idx,
+                "bucket_index": assignment["bucket_index"],
+                "assignment_rationale": assignment["assignment_rationale"],
+            }
+            for idx, assignment in assignments_by_idx.items()
+        ],
+        list(range(len(df))),
+        len(taxonomy["evidence_buckets"]),
+    )
+    for idx, assignment in final_assignments.items():
+        bucket_idx = assignment["bucket_index"]
+        buckets[bucket_idx]["complaint_indices"].append(idx)
+        buckets[bucket_idx]["assignment_rationales"][idx] = assignment["assignment_rationale"]
 
     assigned_count = sum(len(bucket["complaint_indices"]) for bucket in buckets)
     if assigned_count != len(df):
@@ -585,7 +698,8 @@ def _cluster_with_taxonomy(
 
     print(
         f"  Synthesizing PM-facing signals for {len(populated_buckets)} populated "
-        f"evidence buckets via {CLUSTER_MODEL}..."
+        f"evidence buckets via {CLUSTER_MODEL}...",
+        flush=True,
     )
 
     narratives = df["Consumer complaint narrative"].tolist()
@@ -602,7 +716,8 @@ def _cluster_with_taxonomy(
         ]
         print(
             f"    Bucket {bucket_idx + 1}/{len(populated_buckets)}: "
-            f"{bucket['name']} ({len(complaint_indices):,} complaints)"
+            f"{bucket['name']} ({len(complaint_indices):,} complaints)",
+            flush=True,
         )
         prompt = _make_signal_synthesis_prompt(
             pattern,

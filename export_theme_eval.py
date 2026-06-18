@@ -14,8 +14,11 @@ NARRATIVE_LEN = 500
 OUTPUT_PATH.parent.mkdir(exist_ok=True)
 
 df, _ = load_and_filter(PATTERN)
+print(f"Loaded {len(df):,} filtered complaints.", flush=True)
 clusters = cluster_complaints(PATTERN, df, taxonomy_path=TAXONOMY_PATH)
+print(f"Generated {len(clusters):,} taxonomy signals.", flush=True)
 classify_clusters(clusters)
+print("Classified taxonomy signals.", flush=True)
 
 rows = []
 for signal_num, c in enumerate(clusters, start=1):
@@ -52,4 +55,4 @@ with OUTPUT_PATH.open("w", newline="", encoding="utf-8") as f:
     writer.writeheader()
     writer.writerows(rows)
 
-print(f"Wrote {len(rows)} rows to {OUTPUT_PATH}")
+print(f"Wrote {len(rows)} rows to {OUTPUT_PATH}", flush=True)

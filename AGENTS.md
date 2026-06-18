@@ -68,7 +68,7 @@ Do not implement the original hybrid plan as written. The active direction is:
 - Do not let the model invent buckets. It must choose from the curated taxonomy plus `Other/Unclassified`.
 - Use row-level assignment rationales so incorrect bucket placement is auditable in `output/theme_eval_taxonomy_signals.csv`.
 - Generate PM-facing signals from narratives inside each populated evidence bucket. Signals must be more useful than raw CFPB labels.
-- Keep LLM value focused on signal synthesis and hypothesis generation after deterministic bucket assignment.
+- Keep LLM value focused on narrative-first bucket assignment, signal synthesis, and hypothesis generation. CFPB metadata is only grounding context.
 - Keep classification after evidence assembly and signal synthesis.
 
 Read-only validation on 2026-05-06 confirmed the CFPB taxonomy is strong enough to anchor themes: full TransUnion top 8 Issue/Sub-issue combinations cover 91.5% of rows, top 10 cover 94.3%, and top 12 cover 95.9%. The current dispute-pattern reproduction showed top 8 coverage of 92.8%, top 10 of 95.1%, and top 15 of 98.1%.
@@ -76,7 +76,10 @@ Read-only validation on 2026-05-06 confirmed the CFPB taxonomy is strong enough 
 ---
 
 ## Incidents and architectural decisions
-See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix).
+See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix, taxonomy assignment cache/resume behavior).
+
+## Current eval gates
+Run `/Users/aditya/venvs/signal_venv/bin/python eval_bucket_golden.py` before the expensive taxonomy export when changing taxonomy prompts or bucket definitions. It checks known hard cases such as identity-theft blocking, cross-bureau inconsistency, improper report use, and investigation-not-fixed.
 
 ## Install safety
 See global AGENTS.md and shared_context.md for NPM install safety rules.

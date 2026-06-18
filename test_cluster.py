@@ -19,7 +19,10 @@ from src.cluster import (  # noqa: E402
     _get_bad_cluster_ids,
     _parse_json,
     _rebuild_indices,
+    _save_assignment_cache,
     _strip_json_fences,
+    _taxonomy_assignment_cache_key,
+    _load_assignment_cache,
     _validate_bucket_assignments,
     _validate_signal_synthesis,
     _validate_merged_clusters,
@@ -236,6 +239,121 @@ other_bucket:
         self.assertEqual(buckets[0]["complaint_indices"], [])
         self.assertEqual(buckets[1]["complaint_indices"], [0])
         self.assertIn("cross-bureau", buckets[1]["assignment_rationales"][0])
+
+    def test_model_assignment_resumes_from_partial_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            taxonomy = {
+                "evidence_buckets": [
+                    {
+                        "name": "Improper Report Use",
+                        "description": "Unauthorized access, permissible purpose, hard inquiries, or improper use of reports.",
+                        "source_combos": [],
+                        "is_other": False,
+                    },
+                    {
+                        "name": "Cross-Bureau Inconsistent Reporting",
+                        "description": "Same account or identifier is reported differently across bureaus.",
+                        "source_combos": [],
+                        "is_other": False,
+                    },
+                    {
+                        "name": "Other/Unclassified",
+                        "description": "Does not fit.",
+                        "source_combos": [],
+                        "is_other": True,
+                    },
+                ],
+            }
+            df = pd.DataFrame([
+                {
+                    "Complaint ID": "1",
+                    "Issue": "Improper use of your report",
+                    "Sub-issue": "Reporting company used your report improperly",
+                    "Consumer complaint narrative": "I did not authorize a hard inquiry.",
+                },
+                {
+                    "Complaint ID": "2",
+                    "Issue": "Improper use of your report",
+                    "Sub-issue": "Reporting company used your report improperly",
+                    "Consumer complaint narrative": (
+                        "Equifax, Experian, and TransUnion report materially different "
+                        "data for the same account."
+                    ),
+                },
+            ])
+            pattern = "customers unable to dispute incorrect information on their credit report"
+            cache_key = str(Path(tmp) / "taxonomy_assignments.json")
+
+            original_cache_key = __import__("src.cluster").cluster._taxonomy_assignment_cache_key
+            __import__("src.cluster").cluster._taxonomy_assignment_cache_key = lambda *args: cache_key
+            try:
+                _save_assignment_cache(cache_key, {
+                    0: {
+                        "bucket_index": 0,
+                        "assignment_rationale": "Unauthorized hard inquiry.",
+                    }
+                })
+
+                class FakeContent:
+                    text = __import__("json").dumps([
+                        {
+                            "idx": 1,
+                            "bucket_index": 1,
+                            "assignment_rationale": "Narrative is about cross-bureau inconsistency.",
+                        }
+                    ])
+
+                class FakeResponse:
+                    stop_reason = "end_turn"
+                    content = [FakeContent()]
+
+                class FakeClient:
+                    calls = 0
+
+                    class messages:
+                        @staticmethod
+                        def create(**kwargs):
+                            FakeClient.calls += 1
+                            return FakeResponse()
+
+                buckets = _assign_evidence_buckets_with_model(
+                    pattern,
+                    df,
+                    taxonomy,
+                    FakeClient(),
+                )
+                cached = _load_assignment_cache(cache_key, 2, 3)
+
+                self.assertEqual(FakeClient.calls, 1)
+                self.assertEqual(cached[0]["bucket_index"], 0)
+                self.assertEqual(cached[1]["bucket_index"], 1)
+                self.assertEqual(buckets[0]["complaint_indices"], [0])
+                self.assertEqual(buckets[1]["complaint_indices"], [1])
+            finally:
+                __import__("src.cluster").cluster._taxonomy_assignment_cache_key = original_cache_key
+
+    def test_taxonomy_assignment_cache_key_changes_with_bucket_definition(self):
+        df = pd.DataFrame([
+            {
+                "Complaint ID": "1",
+                "Issue": "Issue",
+                "Sub-issue": "Sub",
+                "Consumer complaint narrative": "Text",
+            }
+        ])
+        taxonomy = {
+            "evidence_buckets": [
+                {
+                    "name": "Bucket",
+                    "description": "Original description.",
+                    "source_combos": [],
+                }
+            ]
+        }
+        first = _taxonomy_assignment_cache_key("pattern", df, taxonomy)
+        taxonomy["evidence_buckets"][0]["description"] = "Updated description."
+        second = _taxonomy_assignment_cache_key("pattern", df, taxonomy)
+        self.assertNotEqual(first, second)
 
     def test_validate_signal_synthesis_rejects_bucket_name_as_signal(self):
         bucket = {
