@@ -81,5 +81,8 @@ See `docs/engineering-log.md` for full incident history (consolidation token fai
 ## Current eval gates
 Run `/Users/aditya/venvs/signal_venv/bin/python eval_bucket_golden.py` before the expensive taxonomy export when changing taxonomy prompts or bucket definitions. It checks known hard cases such as identity-theft blocking, cross-bureau inconsistency, improper report use, and investigation-not-fixed.
 
+## Current review checkpoint
+As of 2026-06-24, Adi's first pass on `output/theme_eval_taxonomy_signals.csv` looked good so far. This is enough to continue building scoring and PM brief generation, but not a claim that every exported row has been exhaustively audited.
+
 ## Install safety
 See global AGENTS.md and shared_context.md for NPM install safety rules.

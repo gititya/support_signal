@@ -1,10 +1,11 @@
 ---
 status: "in-progress"
-current_phase: "Signal complaint clustering / PM brief work; taxonomy redesign branch needs review."
-next_action: "Review codex-signal-taxonomy-redesign outputs and check whether exports are stale."
+current_phase: "Signal taxonomy redesign review; initial generated output review looks good so far."
+next_action: "Proceed from trusted taxonomy/signal extraction into scoring and PM brief generation."
 things_to_know:
   - "Narrative complaint text should outrank metadata."
   - "Generated CSV/output files can be stale even when tests pass."
+  - "Adi's first pass on the taxonomy signal export looked good so far."
 ---
 
 # Signal — Session State
@@ -75,3 +76,18 @@ Current stabilization work:
 - Row-level taxonomy assignments are cached under `.batch_cache/taxonomy_assignments_*.json` after every assignment batch, so a killed export can resume without paying for completed rows again.
 - `eval_bucket_golden.py` is the cheap pre-export gate for known hard cases before running the full `export_theme_eval.py`.
 - The taxonomy export still writes to `output/theme_eval_taxonomy_signals.csv` and does not overwrite `output/theme_eval.csv`.
+
+## Codex sync — taxonomy output review checkpoint (2026-06-24)
+
+Adi reported the generated taxonomy/signal output looks good so far. Treat this as initial review confidence, not a final exhaustive row-by-row audit.
+
+Current state:
+- The active review artifact is `output/theme_eval_taxonomy_signals.csv`.
+- Evidence bucket assignment is narrative-first against curated buckets, with CFPB fields used as grounding context.
+- Known hard cases passed the golden eval: identity-theft blocking, cross-bureau inconsistency, unauthorized inquiry/report use, investigation-not-fixed, and account-status wrong.
+- Long taxonomy assignment runs are resumable through `.batch_cache/taxonomy_assignments_*.json`.
+
+Next implementation direction:
+- Continue to Phase 1 scoring and PM brief generation now that the extraction layer is credible enough to build on.
+- Keep classification after evidence assembly and signal synthesis.
+- Do not overwrite `output/theme_eval.csv`; taxonomy review output remains `output/theme_eval_taxonomy_signals.csv`.
