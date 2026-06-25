@@ -1,0 +1,84 @@
+# PM Brief: {{ main_signal.signal_name }}
+
+## At a glance
+
+- **Pattern investigated:** {{ pattern }}
+- **Company/source:** {{ metadata.company }} / CFPB complaint narratives
+- **Date range:** {{ metadata.date_start }} to {{ metadata.date_end }}
+- **Complaints analyzed:** {{ metadata.used_in_analysis }}
+- **Signals found:** {{ total_signal_count }}{{ " (top " ~ signals|length ~ " shown)" if signals|length < total_signal_count else "" }}
+- **Main signal:** {{ main_signal.signal_name }}
+- **Severity:** {{ main_signal.severity }} ({{ main_signal.volume_label }})
+- **Confidence:** {{ main_signal.confidence }}
+
+## Executive summary
+
+{{ narration.executive_summary }}
+
+{{ narration.narrative_framing }}
+
+## Main signal
+
+**{{ main_signal.signal_name }}**
+
+{{ main_signal.signal_description }}
+
+- **Signal type:** {{ main_signal.signal_type }}
+- **Evidence bucket:** {{ main_signal.evidence_bucket_name }}
+- **Complaint volume:** {{ main_signal.complaint_count }}
+- **Scoring rationale:** {{ main_signal.scoring_rationale }}
+
+## Evidence
+
+{% for signal in signals %}
+### {{ loop.index }}. {{ signal.signal_name }}
+
+{{ signal.signal_description }}
+
+- **Evidence bucket:** {{ signal.evidence_bucket_name }}
+- **Bucket distinction:** {{ signal.bucket_distinction }}
+- **Signal type:** {{ signal.signal_type }}
+- **Severity:** {{ signal.severity }}
+- **Volume:** {{ signal.volume_label }} ({{ signal.complaint_count }} complaints)
+- **Confidence:** {{ signal.confidence }}
+
+{% endfor %}
+## Root-cause hypotheses
+
+{% for hypothesis in main_signal.root_cause_hypotheses %}
+- {{ hypothesis }}
+{% endfor %}
+
+## Impact assessment
+
+This appears most relevant to **{{ main_signal.recommended_audience }}** because {{ main_signal.classification_rationale[0:1] | lower }}{{ main_signal.classification_rationale[1:] }}
+
+The evidence is strong enough to justify investigation, but not strong enough to size affected users or business impact. This brief uses public CFPB complaint narratives only.
+
+## Recommended action
+
+{{ narration.recommended_action }}
+
+## Raw complaint samples
+
+{% for example in main_signal.examples %}
+### Sample {{ loop.index }}{% if example.complaint_id %} — CFPB complaint {{ example.complaint_id }}{% endif %}
+
+- **Date:** {{ example.date_received }}
+- **State:** {{ example.state }}
+- **CFPB category:** {{ example.cfpb_issue }} / {{ example.cfpb_sub_issue }}
+
+> {{ example.narrative_excerpt | replace("\n", "\n> ") }}
+
+{% endfor %}
+## What this is not
+
+- Not a claim about total affected users.
+- Not product telemetry.
+- Not proof of root cause.
+- Not a replacement for reviewing internal cases, logs, or support tickets.
+- Not evidence from sources beyond CFPB complaints.
+
+## Methodology
+
+Signal filtered CFPB complaints for the target company and support pattern, assigned complaint narratives into curated evidence buckets, synthesized PM-facing signals from populated buckets, classified each signal after evidence assembly, and scored severity with deterministic heuristics. Root causes are preserved as hypotheses, and confidence remains directional because Phase 1 uses one public source.

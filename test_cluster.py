@@ -1,22 +1,34 @@
 import io
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from types import SimpleNamespace
+
+import pandas as pd
 
 sys.path.insert(0, "/Users/aditya/Documents/Projects/signal")
 sys.modules.setdefault("anthropic", SimpleNamespace(Anthropic=object))
 
 from src.cluster import (  # noqa: E402
     _assign_cluster_ids,
+    _assign_evidence_buckets,
+    _assign_evidence_buckets_with_model,
     _apply_repair_mapping,
     _get_bad_cluster_ids,
     _parse_json,
     _rebuild_indices,
+    _save_assignment_cache,
     _strip_json_fences,
+    _taxonomy_assignment_cache_key,
+    _load_assignment_cache,
+    _validate_bucket_assignments,
+    _validate_signal_synthesis,
     _validate_merged_clusters,
     _validate_repair_mapping,
     _validate_raw_clusters,
+    load_taxonomy,
 )
 
 
@@ -76,6 +88,318 @@ def make_merged_clusters():
         }
         for idx in range(5, 16)
     ]
+
+
+def make_taxonomy_yaml() -> str:
+    return """
+company: TestCo
+evidence_buckets:
+  - name: Account Information Incorrect
+    description: Source category for wrong account details.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Account information incorrect
+  - name: Investigation Did Not Fix Error
+    description: Source category for unresolved dispute investigations.
+    source_combos:
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Their investigation did not fix an error on your report
+other_bucket:
+  name: Other/Unclassified
+  description: Source categories not mapped to a curated evidence bucket.
+  source_combos: []
+"""
+
+
+class TaxonomyBucketTests(unittest.TestCase):
+    def test_load_taxonomy_rejects_missing_file(self):
+        with self.assertRaises(FileNotFoundError):
+            load_taxonomy(Path("/tmp/does-not-exist-taxonomy.yaml"))
+
+    def test_load_taxonomy_rejects_missing_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "taxonomy.yaml"
+            path.write_text("""
+evidence_buckets:
+  - description: Missing name.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Account information incorrect
+other_bucket:
+  name: Other/Unclassified
+  description: Other.
+  source_combos: []
+""")
+            with self.assertRaisesRegex(ValueError, "name"):
+                load_taxonomy(path)
+
+    def test_assign_evidence_buckets_exact_match_and_other(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "taxonomy.yaml"
+            path.write_text(make_taxonomy_yaml())
+            taxonomy = load_taxonomy(path)
+
+        df = pd.DataFrame([
+            {
+                "Issue": "Incorrect information on your report",
+                "Sub-issue": "Account information incorrect",
+                "Consumer complaint narrative": "Wrong balance listed.",
+            },
+            {
+                "Issue": "Unexpected issue",
+                "Sub-issue": "Unexpected sub issue",
+                "Consumer complaint narrative": "Something else happened.",
+            },
+        ], index=[10, 20])
+        buckets = _assign_evidence_buckets(df, taxonomy)
+
+        by_name = {bucket["name"]: bucket for bucket in buckets}
+        self.assertEqual(by_name["Account Information Incorrect"]["complaint_indices"], [0])
+        self.assertEqual(by_name["Other/Unclassified"]["complaint_indices"], [1])
+        self.assertEqual(sum(len(bucket["complaint_indices"]) for bucket in buckets), 2)
+
+    def test_validate_bucket_assignments_rejects_missing_idx(self):
+        result = [{"idx": 0, "bucket_index": 0, "assignment_rationale": "fits"}]
+        with self.assertRaisesRegex(ValueError, "omitted"):
+            _validate_bucket_assignments(result, [0, 1], 2)
+
+    def test_validate_bucket_assignments_rejects_duplicate_idx(self):
+        result = [
+            {"idx": 0, "bucket_index": 0, "assignment_rationale": "fits"},
+            {"idx": 0, "bucket_index": 1, "assignment_rationale": "also fits"},
+        ]
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            _validate_bucket_assignments(result, [0], 2)
+
+    def test_validate_bucket_assignments_rejects_out_of_range_bucket(self):
+        result = [{"idx": 0, "bucket_index": 9, "assignment_rationale": "fits"}]
+        with self.assertRaisesRegex(ValueError, "invalid bucket_index"):
+            _validate_bucket_assignments(result, [0], 2)
+
+    def test_model_assignment_can_override_bad_cfpb_metadata(self):
+        taxonomy = {
+            "evidence_buckets": [
+                {
+                    "name": "Improper Report Use",
+                    "description": "Unauthorized access, permissible purpose, hard inquiries, or improper use of reports.",
+                    "source_combos": [],
+                    "is_other": False,
+                },
+                {
+                    "name": "Cross-Bureau Inconsistent Reporting",
+                    "description": "Same account or identifier is reported differently across bureaus.",
+                    "source_combos": [],
+                    "is_other": False,
+                },
+                {
+                    "name": "Other/Unclassified",
+                    "description": "Does not fit.",
+                    "source_combos": [],
+                    "is_other": True,
+                },
+            ],
+        }
+        df = pd.DataFrame([
+            {
+                "Issue": "Improper use of your report",
+                "Sub-issue": "Reporting company used your report improperly",
+                "Consumer complaint narrative": (
+                    "Equifax, Experian, and TransUnion report materially different data "
+                    "for the same accounts and personal identifiers despite prior disputes."
+                ),
+            }
+        ])
+
+        class FakeContent:
+            text = __import__("json").dumps([
+                {
+                    "idx": 0,
+                    "bucket_index": 1,
+                    "assignment_rationale": "Narrative is about cross-bureau inconsistency, not improper report access.",
+                }
+            ])
+
+        class FakeResponse:
+            stop_reason = "end_turn"
+            content = [FakeContent()]
+
+        class FakeClient:
+            class messages:
+                @staticmethod
+                def create(**kwargs):
+                    return FakeResponse()
+
+        buckets = _assign_evidence_buckets_with_model(
+            "customers unable to dispute incorrect information on their credit report",
+            df,
+            taxonomy,
+            FakeClient(),
+        )
+
+        self.assertEqual(buckets[0]["complaint_indices"], [])
+        self.assertEqual(buckets[1]["complaint_indices"], [0])
+        self.assertIn("cross-bureau", buckets[1]["assignment_rationales"][0])
+
+    def test_model_assignment_resumes_from_partial_cache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            taxonomy = {
+                "evidence_buckets": [
+                    {
+                        "name": "Improper Report Use",
+                        "description": "Unauthorized access, permissible purpose, hard inquiries, or improper use of reports.",
+                        "source_combos": [],
+                        "is_other": False,
+                    },
+                    {
+                        "name": "Cross-Bureau Inconsistent Reporting",
+                        "description": "Same account or identifier is reported differently across bureaus.",
+                        "source_combos": [],
+                        "is_other": False,
+                    },
+                    {
+                        "name": "Other/Unclassified",
+                        "description": "Does not fit.",
+                        "source_combos": [],
+                        "is_other": True,
+                    },
+                ],
+            }
+            df = pd.DataFrame([
+                {
+                    "Complaint ID": "1",
+                    "Issue": "Improper use of your report",
+                    "Sub-issue": "Reporting company used your report improperly",
+                    "Consumer complaint narrative": "I did not authorize a hard inquiry.",
+                },
+                {
+                    "Complaint ID": "2",
+                    "Issue": "Improper use of your report",
+                    "Sub-issue": "Reporting company used your report improperly",
+                    "Consumer complaint narrative": (
+                        "Equifax, Experian, and TransUnion report materially different "
+                        "data for the same account."
+                    ),
+                },
+            ])
+            pattern = "customers unable to dispute incorrect information on their credit report"
+            cache_key = str(Path(tmp) / "taxonomy_assignments.json")
+
+            original_cache_key = __import__("src.cluster").cluster._taxonomy_assignment_cache_key
+            __import__("src.cluster").cluster._taxonomy_assignment_cache_key = lambda *args: cache_key
+            try:
+                _save_assignment_cache(cache_key, {
+                    0: {
+                        "bucket_index": 0,
+                        "assignment_rationale": "Unauthorized hard inquiry.",
+                    }
+                })
+
+                class FakeContent:
+                    text = __import__("json").dumps([
+                        {
+                            "idx": 1,
+                            "bucket_index": 1,
+                            "assignment_rationale": "Narrative is about cross-bureau inconsistency.",
+                        }
+                    ])
+
+                class FakeResponse:
+                    stop_reason = "end_turn"
+                    content = [FakeContent()]
+
+                class FakeClient:
+                    calls = 0
+
+                    class messages:
+                        @staticmethod
+                        def create(**kwargs):
+                            FakeClient.calls += 1
+                            return FakeResponse()
+
+                buckets = _assign_evidence_buckets_with_model(
+                    pattern,
+                    df,
+                    taxonomy,
+                    FakeClient(),
+                )
+                cached = _load_assignment_cache(cache_key, 2, 3)
+
+                self.assertEqual(FakeClient.calls, 1)
+                self.assertEqual(cached[0]["bucket_index"], 0)
+                self.assertEqual(cached[1]["bucket_index"], 1)
+                self.assertEqual(buckets[0]["complaint_indices"], [0])
+                self.assertEqual(buckets[1]["complaint_indices"], [1])
+            finally:
+                __import__("src.cluster").cluster._taxonomy_assignment_cache_key = original_cache_key
+
+    def test_taxonomy_assignment_cache_key_changes_with_bucket_definition(self):
+        df = pd.DataFrame([
+            {
+                "Complaint ID": "1",
+                "Issue": "Issue",
+                "Sub-issue": "Sub",
+                "Consumer complaint narrative": "Text",
+            }
+        ])
+        taxonomy = {
+            "evidence_buckets": [
+                {
+                    "name": "Bucket",
+                    "description": "Original description.",
+                    "source_combos": [],
+                }
+            ]
+        }
+        first = _taxonomy_assignment_cache_key("pattern", df, taxonomy)
+        taxonomy["evidence_buckets"][0]["description"] = "Updated description."
+        second = _taxonomy_assignment_cache_key("pattern", df, taxonomy)
+        self.assertNotEqual(first, second)
+
+    def test_validate_signal_synthesis_rejects_bucket_name_as_signal(self):
+        bucket = {
+            "name": "Account Information Incorrect",
+            "description": "Source category for wrong account details.",
+        }
+        result = [{
+            "signal_name": "Account Information Incorrect",
+            "signal_description": "Users describe unresolved account data problems.",
+            "bucket_distinction": "This bucket is about account-level data fields rather than investigation timing.",
+            "supporting_indices": [0],
+            "root_cause_hypotheses": ["This may indicate dispute evidence is not reflected in report updates."],
+        }]
+        with self.assertRaisesRegex(ValueError, "identical"):
+            _validate_signal_synthesis(result, bucket, [0])
+
+    def test_validate_signal_synthesis_accepts_pm_signal(self):
+        bucket = {
+            "name": "Account Information Incorrect",
+            "description": "Source category for wrong account details.",
+        }
+        result = [{
+            "signal_name": "Dispute evidence appears disconnected from report updates",
+            "signal_description": "Consumers say they submit proof but still see the same incorrect account data.",
+            "bucket_distinction": "This bucket is about account-level data fields rather than investigation timing.",
+            "supporting_indices": [0],
+            "root_cause_hypotheses": ["This may indicate evidence review and report update workflows are not closing the loop."],
+        }]
+        signal = _validate_signal_synthesis(result, bucket, [0])
+        self.assertEqual(signal["supporting_indices"], [0])
+        self.assertIn("root_cause_hypotheses", signal)
+
+    def test_validate_signal_synthesis_rejects_unsupported_qualifier(self):
+        bucket = {
+            "name": "Account Information Incorrect",
+            "description": "Source category for wrong account details.",
+        }
+        result = [{
+            "signal_name": "Persistent dispute loop failure",
+            "signal_description": "Consumers say they submit proof but still see the same incorrect account data.",
+            "bucket_distinction": "This bucket is about account-level data fields rather than investigation timing.",
+            "supporting_indices": [0],
+            "root_cause_hypotheses": ["This may indicate evidence review and report update workflows are not closing the loop."],
+        }]
+        with self.assertRaisesRegex(ValueError, "unsupported qualifier"):
+            _validate_signal_synthesis(result, bucket, [0])
 
 
 class ClusterValidationTests(unittest.TestCase):

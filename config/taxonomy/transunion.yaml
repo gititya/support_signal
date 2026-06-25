@@ -1,0 +1,111 @@
+company: TransUnion
+
+evidence_buckets:
+  - name: Information Belongs to Someone Else
+    description: CFPB complaints where consumers say information on the report belongs to another person or identity.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Information belongs to someone else
+    complaint_count: 4195
+
+  - name: Improper Report Use
+    description: CFPB complaints about TransUnion report access or use that consumers believe was not properly authorized.
+    source_combos:
+      - issue: Improper use of your report
+        sub_issue: Reporting company used your report improperly
+      - issue: Improper use of your report
+        sub_issue: Credit inquiries on your report that you don't recognize
+      - issue: Improper use of your report
+        sub_issue: Report provided to employer without your written authorization
+    complaint_count: 4077
+
+  - name: Investigation Did Not Fix Error
+    description: CFPB complaints where consumers say an investigation closed but the disputed report error remained unresolved.
+    source_combos:
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Their investigation did not fix an error on your report
+    complaint_count: 1060
+
+  - name: Account Information Incorrect
+    description: CFPB complaints about incorrect account details on a credit report.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Account information incorrect
+    complaint_count: 988
+
+  - name: Account Status Incorrect
+    description: CFPB complaints about incorrect account status, such as current, delinquent, closed, or charged-off status.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Account status incorrect
+    complaint_count: 952
+
+  - name: Investigation Delayed or Status Unclear
+    description: CFPB complaints about dispute investigation timing, status visibility, or difficulty getting investigation information.
+    source_combos:
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Investigation took more than 30 days
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Was not notified of investigation status or results
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Difficulty submitting a dispute or getting information about a dispute over the phone
+      - issue: Problem with a company's investigation into an existing problem
+        sub_issue: Problem with personal statement of dispute
+    complaint_count: 943
+
+  - name: Debt Collection Notice Problems
+    description: CFPB complaints about written debt collection notices, debt ownership, or debt verification problems.
+    source_combos:
+      - issue: Written notification about debt
+        sub_issue: Notification didn't disclose it was an attempt to collect a debt
+      - issue: Written notification about debt
+        sub_issue: Didn't receive enough information to verify debt
+      - issue: Written notification about debt
+        sub_issue: Didn't receive notice of right to dispute
+      - issue: Attempts to collect debt not owed
+        sub_issue: Debt is not yours
+      - issue: Attempts to collect debt not owed
+        sub_issue: Debt was result of identity theft
+      - issue: Attempts to collect debt not owed
+        sub_issue: Debt was paid
+    complaint_count: 612
+
+  - name: Personal or Public Record Information Incorrect
+    description: CFPB complaints about incorrect personal details, missing information, inaccurate public records, or old information reappearing.
+    source_combos:
+      - issue: Incorrect information on your report
+        sub_issue: Personal information incorrect
+      - issue: Incorrect information on your report
+        sub_issue: Information is missing that should be on the report
+      - issue: Incorrect information on your report
+        sub_issue: Public record information inaccurate
+      - issue: Incorrect information on your report
+        sub_issue: Old information reappears or never goes away
+      - issue: Incorrect information on your report
+        sub_issue: Information is incorrect
+      - issue: Incorrect information on your report
+        sub_issue: Information that should be on the report is missing
+    complaint_count: 477
+
+  - name: Fraud Alert or Security Freeze Problems
+    description: CFPB complaints about fraud alerts, security freezes, unauthorized cards, or identity protection services.
+    source_combos:
+      - issue: Problem with fraud alerts or security freezes
+        sub_issue: None
+      - issue: Getting a credit card
+        sub_issue: Card opened without my consent or knowledge
+      - issue: Credit monitoring or identity theft protection services
+        sub_issue: Problem canceling credit monitoring or identify theft protection service
+      - issue: Credit monitoring or identity theft protection services
+        sub_issue: Billing dispute for services
+    complaint_count: 86
+
+  - name: Cross-Bureau Inconsistent Reporting
+    description: Consumer says the same account, status, balance, public record, or personal identifier is reported differently across credit bureaus, and uses that inconsistency as evidence that TransUnion's reporting is inaccurate.
+    source_combos: []
+    complaint_count: null
+
+other_bucket:
+  name: Other/Unclassified
+  description: Complaints that do not fit the curated evidence buckets after reading the narrative and CFPB metadata.
+  source_combos: []

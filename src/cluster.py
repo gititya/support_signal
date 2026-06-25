@@ -6,11 +6,19 @@ from collections import Counter
 from pathlib import Path
 
 import anthropic
+import yaml
 
 CLUSTER_MODEL = "claude-sonnet-4-6"
 BATCH_SIZE = 100
 SNIPPET_LEN = 500
 DESCRIPTION_SNIPPET_LEN = 140
+SIGNAL_SAMPLE_SIZE = 8
+ASSIGNMENT_BATCH_SIZE = 50
+DISALLOWED_SIGNAL_NAME_TERMS = (
+    "repeated",
+    "persistent",
+    "multiple cycles",
+)
 OVER_AGGREGATION_WARN_THRESHOLD = 0.5
 HYPOTHESIS_PREFIXES = (
     "This may indicate",
@@ -31,9 +39,143 @@ _CACHE_DIR = Path(__file__).parent.parent / ".batch_cache"
 _CACHE_DIR.mkdir(exist_ok=True)
 
 
+def _normalize_combo_value(value) -> str:
+    if value is None or value != value:
+        return "None"
+    text = str(value).strip()
+    return text if text else "None"
+
+
+def _combo_key(issue, sub_issue) -> tuple[str, str]:
+    return (_normalize_combo_value(issue), _normalize_combo_value(sub_issue))
+
+
+def load_taxonomy(path: Path) -> dict:
+    """
+    Load a curated evidence-bucket taxonomy.
+
+    Taxonomy mode is explicit: if a caller provides a taxonomy path, a missing
+    or invalid file is an error rather than a silent fallback to free clustering.
+    """
+    taxonomy_path = Path(path)
+    if not taxonomy_path.exists():
+        raise FileNotFoundError(f"Taxonomy file not found: {taxonomy_path}")
+
+    data = yaml.safe_load(taxonomy_path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError("Taxonomy YAML must contain a mapping at the top level.")
+
+    buckets = data.get("evidence_buckets")
+    if not isinstance(buckets, list) or not buckets:
+        raise ValueError("Taxonomy must include a non-empty evidence_buckets list.")
+
+    other_bucket = data.get("other_bucket")
+    if not isinstance(other_bucket, dict):
+        raise ValueError("Taxonomy must include other_bucket.")
+
+    normalized_buckets = []
+    combo_to_bucket = {}
+    for bucket_idx, bucket in enumerate(buckets):
+        normalized = _validate_taxonomy_bucket(bucket, bucket_idx, require_combos=False)
+        for combo in normalized["source_combos"]:
+            key = _combo_key(combo["issue"], combo["sub_issue"])
+            if key in combo_to_bucket:
+                raise ValueError(
+                    f"Source combo appears in multiple evidence buckets: {key!r}"
+                )
+            combo_to_bucket[key] = len(normalized_buckets)
+        normalized_buckets.append(normalized)
+
+    normalized_other = _validate_taxonomy_bucket(
+        {
+            **other_bucket,
+            "source_combos": other_bucket.get("source_combos", []),
+            "is_other": True,
+        },
+        len(normalized_buckets),
+        require_combos=False,
+    )
+    normalized_buckets.append(normalized_other)
+
+    return {
+        "company": data.get("company", ""),
+        "evidence_buckets": normalized_buckets,
+        "combo_to_bucket": combo_to_bucket,
+        "other_bucket_index": len(normalized_buckets) - 1,
+    }
+
+
+def _validate_taxonomy_bucket(
+    bucket: dict,
+    bucket_idx: int,
+    require_combos: bool = True,
+) -> dict:
+    if not isinstance(bucket, dict):
+        raise ValueError(f"Evidence bucket {bucket_idx} must be a mapping.")
+
+    name = bucket.get("name")
+    description = bucket.get("description")
+    source_combos = bucket.get("source_combos")
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError(f"Evidence bucket {bucket_idx} is missing a non-empty name.")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"Evidence bucket '{name}' is missing a non-empty description.")
+    if not isinstance(source_combos, list) or (require_combos and not source_combos):
+        raise ValueError(f"Evidence bucket '{name}' must include source_combos.")
+
+    normalized_combos = []
+    for combo_idx, combo in enumerate(source_combos):
+        if not isinstance(combo, dict):
+            raise ValueError(f"Evidence bucket '{name}' source combo {combo_idx} must be a mapping.")
+        issue = combo.get("issue")
+        sub_issue = combo.get("sub_issue")
+        if not isinstance(issue, str) or not issue.strip():
+            raise ValueError(f"Evidence bucket '{name}' source combo {combo_idx} is missing issue.")
+        if not isinstance(sub_issue, str) or not sub_issue.strip():
+            raise ValueError(f"Evidence bucket '{name}' source combo {combo_idx} is missing sub_issue.")
+        normalized_combos.append({
+            "issue": _normalize_combo_value(issue),
+            "sub_issue": _normalize_combo_value(sub_issue),
+        })
+
+    return {
+        "name": name.strip(),
+        "description": description.strip(),
+        "source_combos": normalized_combos,
+        "complaint_count": bucket.get("complaint_count"),
+        "is_other": bool(bucket.get("is_other", False)),
+    }
+
+
 def _cache_key(pattern: str, total: int) -> str:
     h = hashlib.md5(f"{pattern}:{total}:{CLUSTER_MODEL}".encode()).hexdigest()[:12]
     return str(_CACHE_DIR / f"batches_{h}.json")
+
+
+def _taxonomy_assignment_cache_key(pattern: str, df, taxonomy: dict) -> str:
+    complaint_ids = []
+    if "Complaint ID" in df.columns:
+        complaint_ids = [
+            _normalize_combo_value(value)
+            for value in df["Complaint ID"].tolist()
+        ]
+    bucket_fingerprint = [
+        {
+            "name": bucket["name"],
+            "description": bucket["description"],
+        }
+        for bucket in taxonomy["evidence_buckets"]
+    ]
+    payload = {
+        "model": CLUSTER_MODEL,
+        "pattern": pattern,
+        "row_count": len(df),
+        "complaint_ids": complaint_ids,
+        "buckets": bucket_fingerprint,
+    }
+    raw = json.dumps(payload, sort_keys=True)
+    h = hashlib.md5(raw.encode()).hexdigest()[:12]
+    return str(_CACHE_DIR / f"taxonomy_assignments_{h}.json")
 
 
 def _load_cache(key: str):
@@ -45,6 +187,47 @@ def _load_cache(key: str):
 
 def _save_cache(key: str, data):
     Path(key).write_text(json.dumps(data))
+
+
+def _load_assignment_cache(cache_key: str, total: int, n_buckets: int) -> dict[int, dict]:
+    cached = _load_cache(cache_key)
+    if not cached:
+        return {}
+    if not isinstance(cached, list):
+        raise ValueError("Taxonomy assignment cache must be a JSON array.")
+
+    assignments = {}
+    for item in cached:
+        idx = item.get("idx")
+        bucket_index = item.get("bucket_index")
+        rationale = item.get("assignment_rationale")
+        if not isinstance(idx, int) or not (0 <= idx < total):
+            raise ValueError(f"Taxonomy assignment cache contains invalid idx: {idx!r}")
+        if idx in assignments:
+            raise ValueError(f"Taxonomy assignment cache contains duplicate idx: {idx!r}")
+        if not isinstance(bucket_index, int) or not (0 <= bucket_index < n_buckets):
+            raise ValueError(
+                f"Taxonomy assignment cache for idx {idx!r} has invalid bucket_index: {bucket_index!r}"
+            )
+        if not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError(f"Taxonomy assignment cache for idx {idx!r} is missing rationale.")
+        assignments[idx] = {
+            "bucket_index": bucket_index,
+            "assignment_rationale": rationale.strip(),
+        }
+    return assignments
+
+
+def _save_assignment_cache(cache_key: str, assignments: dict[int, dict]) -> None:
+    rows = [
+        {
+            "idx": idx,
+            "bucket_index": assignment["bucket_index"],
+            "assignment_rationale": assignment["assignment_rationale"],
+        }
+        for idx, assignment in sorted(assignments.items())
+    ]
+    _save_cache(cache_key, rows)
 
 
 def _assign_cluster_ids(clusters: list[dict], batch_idx: int) -> list[dict]:
@@ -186,6 +369,394 @@ def _make_cluster_prompt(pattern: str, snippets: list[dict]) -> str:
         f"]\n"
         f"No markdown fences, no commentary — raw JSON only."
     )
+
+
+def _sample_bucket_indices(indices: list[int], limit: int = SIGNAL_SAMPLE_SIZE) -> list[int]:
+    if len(indices) <= limit:
+        return indices
+    if limit <= 1:
+        return [indices[0]]
+    step = (len(indices) - 1) / (limit - 1)
+    return [indices[round(i * step)] for i in range(limit)]
+
+
+def _make_bucket_assignment_prompt(pattern: str, snippets: list[dict], taxonomy: dict) -> str:
+    buckets = [
+        {
+            "bucket_index": i,
+            "name": bucket["name"],
+            "description": bucket["description"],
+            "source_combos": bucket["source_combos"],
+        }
+        for i, bucket in enumerate(taxonomy["evidence_buckets"])
+    ]
+    return (
+        f"You are assigning consumer complaints to fixed evidence buckets for a PM-facing "
+        f"signal intelligence workflow.\n\n"
+        f"User-described support pattern: \"{pattern}\"\n\n"
+        f"Use the complaint narrative as the source of truth. CFPB Issue/Sub-issue metadata is "
+        f"only a hint and may be wrong or overly broad. If the narrative conflicts with the CFPB "
+        f"metadata, follow the narrative.\n\n"
+        f"Fixed evidence buckets:\n{json.dumps(buckets, indent=2)}\n\n"
+        f"Complaints to assign:\n{json.dumps(snippets, indent=2)}\n\n"
+        f"Rules:\n"
+        f"- Assign each complaint to exactly one bucket_index from the fixed list.\n"
+        f"- Do not invent buckets.\n"
+        f"- Use Other/Unclassified only when no curated bucket fits the narrative.\n"
+        f"- Cross-bureau inconsistencies should go to Cross-Bureau Inconsistent Reporting, "
+        f"even if the CFPB issue says Improper Report Use.\n"
+        f"- Identity theft packets, FTC reports, fraud alerts, or blocked fraudulent accounts "
+        f"should go to Fraud Alert or Security Freeze Problems.\n"
+        f"- Unauthorized access, permissible purpose, hard inquiries, or report access/use "
+        f"should go to Improper Report Use.\n\n"
+        f"Return ONLY valid JSON — an array of {len(snippets)} objects:\n"
+        f"[\n"
+        f"  {{\"idx\": 0, \"bucket_index\": 3, \"assignment_rationale\": \"short reason\"}}\n"
+        f"]\n"
+        f"No markdown fences, no commentary — raw JSON only."
+    )
+
+
+def _validate_bucket_assignments(
+    result: list[dict],
+    expected_indices: list[int],
+    n_buckets: int,
+) -> dict[int, dict]:
+    if not isinstance(result, list):
+        raise ValueError("Bucket assignment output must be a JSON array.")
+
+    expected_set = set(expected_indices)
+    assignments = {}
+    for item in result:
+        idx = item.get("idx")
+        bucket_index = item.get("bucket_index")
+        rationale = item.get("assignment_rationale")
+        if not isinstance(idx, int) or idx not in expected_set:
+            raise ValueError(f"Bucket assignment contains invalid idx: {idx!r}")
+        if idx in assignments:
+            raise ValueError(f"Bucket assignment contains duplicate idx: {idx!r}")
+        if not isinstance(bucket_index, int) or not (0 <= bucket_index < n_buckets):
+            raise ValueError(f"Bucket assignment for idx {idx!r} has invalid bucket_index: {bucket_index!r}")
+        if not isinstance(rationale, str) or not rationale.strip():
+            raise ValueError(f"Bucket assignment for idx {idx!r} is missing assignment_rationale.")
+        assignments[idx] = {
+            "bucket_index": bucket_index,
+            "assignment_rationale": rationale.strip(),
+        }
+
+    missing = sorted(expected_set - set(assignments))
+    if missing:
+        raise ValueError(f"Bucket assignment omitted complaint indices: {missing}")
+    return assignments
+
+
+def _make_signal_synthesis_prompt(
+    pattern: str,
+    evidence_bucket: dict,
+    snippets: list[dict],
+    bucket_count: int,
+    retry_feedback: str = "",
+) -> str:
+    retry_block = f"\nPrevious output problem to fix: {retry_feedback}\n" if retry_feedback else ""
+    return (
+        f"You are translating grounded complaint evidence into one PM-facing product signal.\n\n"
+        f"User-described support pattern: \"{pattern}\"\n\n"
+        f"Evidence bucket from CFPB metadata:\n"
+        f"- name: {evidence_bucket['name']}\n"
+        f"- description: {evidence_bucket['description']}\n"
+        f"- total complaints in bucket: {bucket_count}\n\n"
+        f"Complaint excerpts sampled from this bucket:\n{json.dumps(snippets, indent=2)}\n\n"
+        f"Create a product signal that is more useful than the CFPB bucket label. "
+        f"Do not simply repeat or lightly rename the evidence bucket. "
+        f"Focus on what a PM should understand about the user problem, workflow failure, "
+        f"or trust breakdown in the narratives.\n"
+        f"The signal must preserve what is distinct about this evidence bucket. "
+        f"Do not flatten every bucket into the same generic dispute-loop story. "
+        f"If the sampled narratives do not clearly support the bucket label, say that the "
+        f"source category appears noisy or misfiled in the bucket_distinction field.\n"
+        f"Do not use words like repeated, persistent, or multiple cycles in the signal_name "
+        f"unless the sampled excerpts explicitly show repeat behavior. Prefer neutral wording "
+        f"like unresolved, uncorrected, ignored, opaque, or missing follow-through.\n"
+        f"{retry_block}\n"
+        f"Return ONLY valid JSON — an array with exactly one signal object:\n"
+        f"[\n"
+        f"  {{\n"
+        f"    \"signal_name\": \"short PM-facing signal name\",\n"
+        f"    \"signal_description\": \"1-2 sentence explanation of what users are experiencing\",\n"
+        f"    \"bucket_distinction\": \"one sentence explaining what is distinct about this evidence bucket versus the other buckets\",\n"
+        f"    \"supporting_indices\": [0, 3, 7],\n"
+        f"    \"root_cause_hypotheses\": [\"This may indicate...\", \"Evidence suggests...\"]\n"
+        f"  }}\n"
+        f"]\n\n"
+        f"Rules:\n"
+        f"- supporting_indices must come from the sampled complaint idx values above.\n"
+        f"- Include 1-3 root_cause_hypotheses.\n"
+        f"- Each hypothesis MUST begin with one of: \"This may indicate\", "
+        f"\"Evidence suggests\", or \"This pattern is consistent with\".\n"
+        f"- Root causes are hypotheses, never facts.\n"
+        f"- No markdown fences, no commentary — raw JSON only."
+    )
+
+
+def _validate_signal_synthesis(result: list[dict], evidence_bucket: dict, sample_indices: list[int]) -> dict:
+    if not isinstance(result, list) or len(result) != 1:
+        raise ValueError("Signal synthesis must return exactly one signal object.")
+    signal = result[0]
+    signal_name = signal.get("signal_name")
+    signal_description = signal.get("signal_description")
+    bucket_distinction = signal.get("bucket_distinction")
+    supporting_indices = signal.get("supporting_indices")
+    hypotheses = signal.get("root_cause_hypotheses")
+
+    if not isinstance(signal_name, str) or not signal_name.strip():
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' is missing signal_name.")
+    if signal_name.strip().lower() == evidence_bucket["name"].strip().lower():
+        raise ValueError(
+            f"Signal name must not be identical to evidence bucket name: {signal_name!r}"
+        )
+    signal_name_lower = signal_name.strip().lower()
+    for term in DISALLOWED_SIGNAL_NAME_TERMS:
+        if term in signal_name_lower:
+            raise ValueError(
+                f"Signal name contains unsupported qualifier {term!r}: {signal_name!r}"
+            )
+    if not isinstance(signal_description, str) or not signal_description.strip():
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' is missing signal_description.")
+    if not isinstance(bucket_distinction, str) or not bucket_distinction.strip():
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' is missing bucket_distinction.")
+    if not isinstance(supporting_indices, list) or not supporting_indices:
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' must include supporting_indices.")
+
+    sample_set = set(sample_indices)
+    for idx in supporting_indices:
+        if not isinstance(idx, int) or idx not in sample_set:
+            raise ValueError(
+                f"Signal for bucket '{evidence_bucket['name']}' contains invalid supporting index: {idx!r}"
+            )
+
+    if not isinstance(hypotheses, list) or not hypotheses:
+        raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' must include root_cause_hypotheses.")
+    for hypothesis in hypotheses:
+        if not isinstance(hypothesis, str) or not hypothesis.strip():
+            raise ValueError(f"Signal for bucket '{evidence_bucket['name']}' contains an empty hypothesis.")
+        if not hypothesis.startswith(HYPOTHESIS_PREFIXES):
+            raise ValueError(
+                f"Signal for bucket '{evidence_bucket['name']}' has invalid hypothesis prefix: {hypothesis!r}"
+            )
+
+    return {
+        "signal_name": signal_name.strip(),
+        "signal_description": signal_description.strip(),
+        "bucket_distinction": bucket_distinction.strip(),
+        "supporting_indices": sorted(set(supporting_indices)),
+        "root_cause_hypotheses": hypotheses,
+    }
+
+
+def _assign_evidence_buckets(df, taxonomy: dict) -> list[dict]:
+    buckets = [
+        {
+            **bucket,
+            "complaint_indices": [],
+        }
+        for bucket in taxonomy["evidence_buckets"]
+    ]
+    combo_to_bucket = taxonomy["combo_to_bucket"]
+    other_idx = taxonomy["other_bucket_index"]
+
+    for idx, (_, row) in enumerate(df.iterrows()):
+        key = _combo_key(row.get("Issue"), row.get("Sub-issue"))
+        bucket_idx = combo_to_bucket.get(key, other_idx)
+        buckets[bucket_idx]["complaint_indices"].append(idx)
+
+    assigned_count = sum(len(bucket["complaint_indices"]) for bucket in buckets)
+    if assigned_count != len(df):
+        raise ValueError("Evidence bucket assignment did not preserve complaint coverage.")
+
+    return buckets
+
+
+def _assign_evidence_buckets_with_model(
+    pattern: str,
+    df,
+    taxonomy: dict,
+    client: anthropic.Anthropic,
+) -> list[dict]:
+    buckets = [
+        {
+            **bucket,
+            "complaint_indices": [],
+            "assignment_rationales": {},
+        }
+        for bucket in taxonomy["evidence_buckets"]
+    ]
+    narratives = df["Consumer complaint narrative"].tolist()
+    snippets = [
+        {
+            "idx": idx,
+            "cfpb_issue": _normalize_combo_value(row.get("Issue")),
+            "cfpb_sub_issue": _normalize_combo_value(row.get("Sub-issue")),
+            "text": str(narratives[idx])[:SNIPPET_LEN],
+        }
+        for idx, (_, row) in enumerate(df.iterrows())
+    ]
+    batches = [
+        snippets[i:i + ASSIGNMENT_BATCH_SIZE]
+        for i in range(0, len(snippets), ASSIGNMENT_BATCH_SIZE)
+    ]
+    cache_key = _taxonomy_assignment_cache_key(pattern, df, taxonomy)
+    assignments_by_idx = _load_assignment_cache(
+        cache_key,
+        len(df),
+        len(taxonomy["evidence_buckets"]),
+    )
+
+    print(
+        f"  Assigning {len(df):,} complaints into evidence buckets via narrative-first "
+        f"{CLUSTER_MODEL} classification...",
+        flush=True,
+    )
+    if assignments_by_idx:
+        print(
+            f"  Loaded {len(assignments_by_idx):,}/{len(df):,} cached taxonomy assignments.",
+            flush=True,
+        )
+    for batch_idx, batch in enumerate(batches):
+        pending_batch = [
+            item for item in batch
+            if item["idx"] not in assignments_by_idx
+        ]
+        if not pending_batch:
+            print(
+                f"    Assignment batch {batch_idx + 1}/{len(batches)} already cached.",
+                flush=True,
+            )
+            continue
+
+        print(
+            f"    Assignment batch {batch_idx + 1}/{len(batches)} "
+            f"({len(pending_batch)} uncached complaints)...",
+            flush=True,
+        )
+        prompt = _make_bucket_assignment_prompt(pattern, pending_batch, taxonomy)
+        result = _call_model(prompt, client, max_tokens=4096)
+        expected_indices = [item["idx"] for item in pending_batch]
+        assignments = _validate_bucket_assignments(
+            result,
+            expected_indices,
+            len(taxonomy["evidence_buckets"]),
+        )
+        assignments_by_idx.update(assignments)
+        _save_assignment_cache(cache_key, assignments_by_idx)
+        print(
+            f"    Cached {len(assignments_by_idx):,}/{len(df):,} taxonomy assignments.",
+            flush=True,
+        )
+
+    final_assignments = _validate_bucket_assignments(
+        [
+            {
+                "idx": idx,
+                "bucket_index": assignment["bucket_index"],
+                "assignment_rationale": assignment["assignment_rationale"],
+            }
+            for idx, assignment in assignments_by_idx.items()
+        ],
+        list(range(len(df))),
+        len(taxonomy["evidence_buckets"]),
+    )
+    for idx, assignment in final_assignments.items():
+        bucket_idx = assignment["bucket_index"]
+        buckets[bucket_idx]["complaint_indices"].append(idx)
+        buckets[bucket_idx]["assignment_rationales"][idx] = assignment["assignment_rationale"]
+
+    assigned_count = sum(len(bucket["complaint_indices"]) for bucket in buckets)
+    if assigned_count != len(df):
+        raise ValueError("Model evidence bucket assignment did not preserve complaint coverage.")
+
+    return buckets
+
+
+def _cluster_with_taxonomy(
+    pattern: str,
+    df,
+    taxonomy: dict,
+    client: anthropic.Anthropic,
+) -> list[dict]:
+    if client is None:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
+        client = anthropic.Anthropic(api_key=api_key)
+
+    buckets = _assign_evidence_buckets_with_model(pattern, df, taxonomy, client)
+    populated_buckets = [
+        bucket for bucket in buckets
+        if bucket["complaint_indices"]
+    ]
+    populated_buckets.sort(key=lambda bucket: len(bucket["complaint_indices"]), reverse=True)
+
+    print(
+        f"  Synthesizing PM-facing signals for {len(populated_buckets)} populated "
+        f"evidence buckets via {CLUSTER_MODEL}...",
+        flush=True,
+    )
+
+    narratives = df["Consumer complaint narrative"].tolist()
+    signals = []
+    for bucket_idx, bucket in enumerate(populated_buckets):
+        complaint_indices = bucket["complaint_indices"]
+        sample_indices = _sample_bucket_indices(complaint_indices)
+        snippets = [
+            {
+                "idx": idx,
+                "text": str(narratives[idx])[:SNIPPET_LEN],
+            }
+            for idx in sample_indices
+        ]
+        print(
+            f"    Bucket {bucket_idx + 1}/{len(populated_buckets)}: "
+            f"{bucket['name']} ({len(complaint_indices):,} complaints)",
+            flush=True,
+        )
+        prompt = _make_signal_synthesis_prompt(
+            pattern,
+            bucket,
+            snippets,
+            len(complaint_indices),
+        )
+        result = _call_model(prompt, client, max_tokens=2048)
+        try:
+            signal = _validate_signal_synthesis(result, bucket, sample_indices)
+        except ValueError as first_err:
+            retry_prompt = _make_signal_synthesis_prompt(
+                pattern,
+                bucket,
+                snippets,
+                len(complaint_indices),
+                retry_feedback=str(first_err),
+            )
+            retry_result = _call_model(retry_prompt, client, max_tokens=2048)
+            signal = _validate_signal_synthesis(retry_result, bucket, sample_indices)
+        signals.append({
+            "name": signal["signal_name"],
+            "description": signal["signal_description"],
+            "signal_name": signal["signal_name"],
+            "signal_description": signal["signal_description"],
+            "bucket_distinction": signal["bucket_distinction"],
+            "evidence_bucket_name": bucket["name"],
+            "evidence_bucket_description": bucket["description"],
+            "evidence_bucket_source_combos": bucket["source_combos"],
+            "evidence_bucket_assignment_rationales": bucket.get("assignment_rationales", {}),
+            "is_other_bucket": bucket.get("is_other", False),
+            "complaint_indices": sorted(complaint_indices),
+            "supporting_indices": signal["supporting_indices"],
+            "hypotheses": signal["root_cause_hypotheses"],
+            "root_cause_hypotheses": signal["root_cause_hypotheses"],
+            "complaint_count": len(complaint_indices),
+        })
+
+    return signals
 
 
 def _make_consolidation_prompt(pattern: str, name_clusters: list[dict]) -> str:
@@ -445,12 +1016,21 @@ def _rebuild_indices(merged_clusters: list[dict], batch_clusters: list[list[dict
     return merged_clusters
 
 
-def cluster_complaints(pattern: str, df, client: anthropic.Anthropic = None) -> list[dict]:
+def cluster_complaints(
+    pattern: str,
+    df,
+    client: anthropic.Anthropic = None,
+    taxonomy_path: Path = None,
+) -> list[dict]:
     """
     Cluster filtered complaints and generate root-cause hypotheses.
 
     Returns list of cluster dicts: {name, description, complaint_indices, hypotheses, complaint_count}
     """
+    if taxonomy_path is not None:
+        taxonomy = load_taxonomy(taxonomy_path)
+        return _cluster_with_taxonomy(pattern, df, taxonomy, client)
+
     if client is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
