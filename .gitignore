@@ -1,7 +1,11 @@
 data/
-.env
+.env*
 __pycache__/
 *.pyc
 .batch_cache/
 .DS_Store
 output/
+*.pem
+*.p12
+*serviceaccount*
+*service-account*

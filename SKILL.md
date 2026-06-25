@@ -91,3 +91,14 @@ Next implementation direction:
 - Continue to Phase 1 scoring and PM brief generation now that the extraction layer is credible enough to build on.
 - Keep classification after evidence assembly and signal synthesis.
 - Do not overwrite `output/theme_eval.csv`; taxonomy review output remains `output/theme_eval_taxonomy_signals.csv`.
+
+## Codex closeout update — packaging and reviewer readiness (2026-06-25)
+
+The older "Current phase" table above is superseded for closeout purposes: `src/score.py`, `templates/brief_pm.md.j2`, `src/narrate.py`, and `signal.py` now exist on the taxonomy branch and generate a scored PM brief.
+
+Current closeout direction:
+- Freeze extraction. Do not reopen taxonomy, clustering, scoring, or signal synthesis unless verification finds a concrete blocker.
+- Treat `output/pm_brief_customers-unable-to-dispute-incorrect-information-on-their-c_20260624-222400.md` as the committed demo artifact.
+- Keep offline verification on `unittest`; `pytest` is not a project dependency.
+- `test_key.py` is a live API smoke test and should skip cleanly when `ANTHROPIC_API_KEY` is absent.
+- The README is the front door for reviewers: lead with the generated brief, B2C/CFPB framing, the engineering log, the reusable engine/domain seam, and PII/API caveats for bring-your-own data.

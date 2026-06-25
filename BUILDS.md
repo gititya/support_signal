@@ -1,7 +1,7 @@
 ---
 status: "in-progress"
-current_state: "Signal Phase 1 now generates scored PM briefs from the taxonomy signal pipeline."
-next_action: "Review the generated PM brief for usefulness and decide whether Phase 1 is close enough to package."
+current_state: "Signal closeout packaging is underway: README front door, offline tests, and generated PM brief are in place on the closeout branch."
+next_action: "Review the README and committed PM brief as the proof-of-work package."
 things_to_know:
   - "Narrative complaint text should outrank metadata."
   - "Generated CSV/output files can be stale even when tests pass."
@@ -19,7 +19,7 @@ agent_notes:
   - "Generated CSV/output files can be stale even when tests pass."
   - "Review actual outputs before claiming taxonomy quality."
 safe_first_action: "Use the latest taxonomy output and golden eval before changing classification logic."
-updated_at: "2026-06-24"
+updated_at: "2026-06-25"
 updated_by: "codex"
 ---
 

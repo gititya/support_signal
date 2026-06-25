@@ -62,3 +62,7 @@ See `docs/engineering-log.md` for full incident history (consolidation token fai
 
 ## Install safety
 See global CLAUDE.md and shared_context.md for NPM install safety rules.
+
+## Closeout state (2026-06-25)
+
+The taxonomy branch now includes scoring, PM brief rendering, and a committed demo brief. Treat extraction as frozen unless a concrete verification blocker appears. Closeout work should focus on packaging: reviewer-readable README, offline `unittest` coverage, stale duplicate cleanup, and accurate safety notes for CFPB-shaped bring-your-own data. `test_key.py` is a live Anthropic smoke test and should skip when `ANTHROPIC_API_KEY` is absent.
