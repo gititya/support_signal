@@ -106,22 +106,26 @@ class NarrateTests(unittest.TestCase):
             }
         ]
 
-        class FakeContent:
-            text = __import__("json").dumps({
+        class FakeMessage:
+            content = __import__("json").dumps({
                 "executive_summary": "Consumers correctly execute the process.",
                 "recommended_action": "Review cases.",
                 "narrative_framing": "This is directional.",
             })
 
+        class FakeChoice:
+            finish_reason = "stop"
+            message = FakeMessage()
+
         class FakeResponse:
-            stop_reason = "end_turn"
-            content = [FakeContent()]
+            choices = [FakeChoice()]
 
         class FakeClient:
-            class messages:
-                @staticmethod
-                def create(**kwargs):
-                    return FakeResponse()
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**kwargs):
+                        return FakeResponse()
 
         with self.assertRaisesRegex(ValueError, "overclaimed"):
             generate_pm_brief("pattern", {"used_in_analysis": 1}, signals, df, client=FakeClient())

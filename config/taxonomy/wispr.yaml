@@ -1,0 +1,164 @@
+company: Wispr Flow
+
+# Buckets derived from the verbatim corpus in
+# attic/Builds/Customer support/wispr_flow_feedback_buckets_and_use_cases.md
+# plus the LinkedIn extraction. source_combos are empty by design: this corpus
+# has no CFPB Issue/Sub-issue metadata, so assignment is narrative-only.
+#
+# Descriptions are written to DISCRIMINATE, not just describe. The pairs users
+# routinely conflate (onset clipping vs accuracy regression; accent vs
+# translation) carry explicit "not this" clauses, because separating them is the
+# whole point of the exercise.
+
+evidence_buckets:
+  - name: Floating Pill / UI Obstruction
+    description: >
+      The desktop floating pill, mic bar, or widget physically gets in the user's
+      way: covering the macOS dock, overlapping app content or text fields,
+      colliding with scrollbars, blocking clicks, interfering with screen sharing,
+      or being impossible to move. Also covers users typing "into the void"
+      because the pill sits over the field they are aiming at, and complaints that
+      the UI is distracting or pops up unwanted notifications. Assign here when the
+      grievance is about the on-screen element itself, not about what was transcribed.
+    source_combos: []
+
+  - name: Onset Clipping / First Words Cut Off
+    description: >
+      Capture starts late, so the opening words of an utterance are lost or
+      mangled. Signals include "the first few words always get cut off", a
+      measurable delay between pressing the hotkey and recording beginning, having
+      to pause before speaking, or needing a throwaway word to wake it up. This is
+      a TIMING failure at the start of capture. Do NOT assign general
+      "accuracy has gotten worse" complaints here unless the user specifically
+      identifies the beginning of the utterance as the problem.
+    source_combos: []
+
+  - name: Accuracy Regression / Transcription Quality
+    description: >
+      Transcription is wrong, or has degraded over time. Includes misheard words,
+      whole missing sentences, "it used to be magical and now it isn't", explicit
+      comparisons to a previously better state or to competitors, and users
+      reporting a percentage of output they must correct by hand. Assign here for
+      general word-error complaints across the whole utterance. Do NOT assign here
+      if the user pins the problem specifically to the first words (that is Onset
+      Clipping) or to the cleanup layer changing their meaning (that is AI Rewrite).
+    source_combos: []
+
+  - name: AI Rewrite / Intent Change / Formatting
+    description: >
+      The post-processing layer alters what the user actually said: rewriting for
+      grammar in a way that changes meaning, ending sentences early and starting
+      new ones, producing run-on sentences, unwanted or inconsistent bullet
+      formatting, or being unable to get punctuation without speaking it aloud.
+      Includes requests for a raw or less aggressive mode. The words were heard
+      correctly; the cleanup layer is the problem.
+    source_combos: []
+
+  - name: iOS Keyboard & App-Switch Friction
+    description: >
+      The iOS experience specifically: having to open the Wispr app and swipe back
+      to the original app, keeping the app foregrounded while dictating, multiple
+      taps before speaking, the Dynamic Island being distracting, losing scroll
+      position when switching, and the Wispr keyboard being worse than Apple's
+      (no autocorrect, different key layout, broken space-bar cursor behaviour).
+      Also iPad complaints.
+    source_combos: []
+
+  - name: Android Insertion & Accessibility
+    description: >
+      Android-specific failures to get text into the target app: losing the
+      accessibility permission repeatedly, text not pasting automatically, falling
+      back to the clipboard, the literal word "Message" being prepended in
+      WhatsApp, and the accessibility service blocking OTHER apps from opening
+      (notably banking apps). Assign here for Android platform integration
+      problems, not for Android transcription accuracy.
+    source_combos: []
+
+  - name: Reliability / Silent Failure / Retry
+    description: >
+      The user speaks and gets nothing back, or has to retry. Includes "sorry, I
+      wasn't able to transcribe", getting stuck on retry, long dictations dropping
+      entirely after several minutes, notetaking mode truncating, freezes, crashes,
+      and failures after switching networks or reconnecting Ethernet. The defining
+      feature is lost work with no warning, and requests to be told BEFORE wasting
+      a long dictation.
+    source_combos: []
+
+  - name: Performance / Latency / Resource Usage
+    description: >
+      The app is slow or heavy: long transcription latency, slow startup, high
+      RAM or CPU consumption while idle in the background, large install size
+      driving uninstalls, phone overheating, Electron bloat, and complaints that it
+      degrades the rest of the machine. Speed and resource cost, not correctness.
+    source_combos: []
+
+  - name: Mic / Input Device / Background Noise
+    description: >
+      Audio input problems: no microphone priority list, defaulting back to AirPods,
+      having to change input device manually when moving desks, poor quality via
+      AirPods, failure to hear whispering, picking up other people's voices, and
+      recording nothing in a noisy environment. Also the mic/input switcher popups
+      being intrusive.
+    source_combos: []
+
+  - name: Dictionary / Proper Nouns / No Learning
+    description: >
+      Names, brands, company names, technical terms and abbreviations are
+      transcribed wrong, and corrections do not persist. Includes the dictionary
+      being the wrong instrument (a blanket find-and-replace breaks the common
+      word), automatic dictionary additions behaving unpredictably, and requests to
+      spell a word out loud or teach it by voice.
+    source_combos: []
+
+  - name: Accent & Multilingual / Unprompted Translation
+    description: >
+      Language handling: non-US and non-native accents transcribed poorly, Indian
+      names and Hinglish, Urdu-English mixing, Punjabi, and per-language quirks.
+      Critically also covers UNPROMPTED TRANSLATION, where the user speaks one
+      language and the output silently arrives in another, with no way to disable
+      it. Assign here when the language or accent is the identified cause.
+    source_combos: []
+
+  - name: Activation / Shortcuts / Launch
+    description: >
+      Getting the thing started: unreliable or unrecognised hotkeys, hyper-key and
+      modifier combinations misread, awkward two-key chords, the app being hard to
+      launch, popups that will not close, and requests for alternative triggers
+      such as a mouse button, the power button, or password-manager-style
+      invocation. About invocation, not about what happens after.
+    source_combos: []
+
+  - name: Privacy / Offline / Local Model
+    description: >
+      Data control and connectivity: no offline mode, unusable on poor networks,
+      requests for a local or on-device model even at reduced quality, wanting to
+      self-host or bring their own backend, objections to being closed source, and
+      questions about zero data retention for professional use.
+    source_combos: []
+
+  - name: Pricing / Billing / Plans
+    description: >
+      Money: subscription cost versus perceived value, free-plan word caps and
+      dictation time limits being too small, requests for regional pricing,
+      repeated upgrade nudges and gamified referral prompts, billing bugs that keep
+      asking for payment, unhonoured promotional offers, and team/seat problems
+      where a work email forces a whole-team upgrade.
+    source_combos: []
+
+  - name: Platform Gaps & Feature Requests
+    description: >
+      Things that do not exist yet, rather than things that are broken. Includes no
+      Linux support, no iPad app, requests for voice-driven editing and correction
+      ("erase that last line"), a real-time view of text as you speak, voice-to-
+      prompt commands, webhook or automation routing instead of paste, screen
+      awareness, context from email and chat, and third-party integrations.
+    source_combos: []
+
+other_bucket:
+  name: No Actionable Complaint
+  description: >
+    Praise, thanks, star-rating-only reviews, general enthusiasm, questions with
+    no described problem, off-topic chatter, competitor promotion, and bot or
+    moderator messages. A large share of app-store reviews are positive; they
+    belong here rather than being forced into a complaint bucket. Assign here
+    whenever there is no specific, actionable product grievance.

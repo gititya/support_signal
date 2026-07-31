@@ -51,7 +51,7 @@ Use the project virtual environment:
 /Users/aditya/venvs/signal_venv/bin/python -m unittest discover -v
 ```
 
-To run the live pipeline, set `ANTHROPIC_API_KEY` and provide the CFPB complaints CSV at `data/complaints.csv`:
+To run the live pipeline, set `OPENROUTER_API_KEY` and provide the CFPB complaints CSV at `data/complaints.csv`:
 
 ```bash
 /Users/aditya/venvs/signal_venv/bin/python signal.py
@@ -69,7 +69,7 @@ You can pass another pattern:
 /Users/aditya/venvs/signal_venv/bin/python signal.py "customers receiving repeated identity theft denials"
 ```
 
-Live runs send complaint narratives to the Claude API. The offline unit tests do not require an API key; the live key smoke test skips when `ANTHROPIC_API_KEY` is absent.
+Live runs send complaint narratives to Claude models via OpenRouter. The offline unit tests do not require an API key; the live key smoke test skips when `OPENROUTER_API_KEY` is absent.
 
 ## Run it on your own support data
 

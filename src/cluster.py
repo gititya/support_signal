@@ -1,14 +1,15 @@
-import os
 import json
 import re
 import hashlib
 from collections import Counter
 from pathlib import Path
 
-import anthropic
+import openai
 import yaml
 
-CLUSTER_MODEL = "claude-sonnet-4-6"
+from src.llm_client import get_client
+
+CLUSTER_MODEL = "anthropic/claude-sonnet-4.5"
 BATCH_SIZE = 100
 SNIPPET_LEN = 500
 DESCRIPTION_SNIPPET_LEN = 140
@@ -421,6 +422,7 @@ def _validate_bucket_assignments(
     result: list[dict],
     expected_indices: list[int],
     n_buckets: int,
+    fill_missing: int | None = None,
 ) -> dict[int, dict]:
     if not isinstance(result, list):
         raise ValueError("Bucket assignment output must be a JSON array.")
@@ -446,7 +448,16 @@ def _validate_bucket_assignments(
 
     missing = sorted(expected_set - set(assignments))
     if missing:
-        raise ValueError(f"Bucket assignment omitted complaint indices: {missing}")
+        if fill_missing is None:
+            raise ValueError(f"Bucket assignment omitted complaint indices: {missing}")
+        # One dropped row in a 50-row batch shouldn't cost the whole run. A row
+        # the model declined to emit is, in practice, one it saw nothing in.
+        for idx in missing:
+            assignments[idx] = {
+                "bucket_index": fill_missing,
+                "assignment_rationale": "Model omitted this row; defaulted to the catch-all bucket.",
+            }
+        print(f"      Filled {len(missing)} omitted row(s) with the catch-all bucket.", flush=True)
     return assignments
 
 
@@ -580,7 +591,7 @@ def _assign_evidence_buckets_with_model(
     pattern: str,
     df,
     taxonomy: dict,
-    client: anthropic.Anthropic,
+    client: openai.OpenAI,
 ) -> list[dict]:
     buckets = [
         {
@@ -645,6 +656,7 @@ def _assign_evidence_buckets_with_model(
             result,
             expected_indices,
             len(taxonomy["evidence_buckets"]),
+            fill_missing=taxonomy["other_bucket_index"],
         )
         assignments_by_idx.update(assignments)
         _save_assignment_cache(cache_key, assignments_by_idx)
@@ -681,13 +693,10 @@ def _cluster_with_taxonomy(
     pattern: str,
     df,
     taxonomy: dict,
-    client: anthropic.Anthropic,
+    client: openai.OpenAI,
 ) -> list[dict]:
     if client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_client()
 
     buckets = _assign_evidence_buckets_with_model(pattern, df, taxonomy, client)
     populated_buckets = [
@@ -892,15 +901,25 @@ def _parse_json(raw: str) -> list[dict]:
     return json.loads(raw)
 
 
-def _call_model(prompt: str, client: anthropic.Anthropic, max_tokens: int = 4096) -> list[dict]:
-    response = client.messages.create(
+def _first_text(response) -> str:
+    text = response.choices[0].message.content
+    if not text:
+        raise ValueError(
+            f"No text in response (finish_reason: {response.choices[0].finish_reason})"
+        )
+    return text
+
+
+def _call_model(prompt: str, client: openai.OpenAI, max_tokens: int = 4096) -> list[dict]:
+    response = client.chat.completions.create(
         model=CLUSTER_MODEL,
         max_tokens=max_tokens,
+        extra_body={"reasoning": {"effort": "low"}},  # classification; bounds thinking spend
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = response.content[0].text
+    raw = _first_text(response)
     # GUARDRAIL: detect truncation before attempting parse
-    if response.stop_reason == "max_tokens":
+    if response.choices[0].finish_reason == "length":
         raise ValueError(
             f"Consolidation response hit max_tokens={max_tokens} and was truncated. "
             f"Reduce input cluster count or raise max_tokens. "
@@ -909,21 +928,22 @@ def _call_model(prompt: str, client: anthropic.Anthropic, max_tokens: int = 4096
     return _parse_json(raw)
 
 
-def _call_model_raw(prompt: str, client: anthropic.Anthropic, max_tokens: int = 4096) -> tuple[str, str | None]:
-    """Like _call_model but returns raw text and stop_reason without parsing."""
-    response = client.messages.create(
+def _call_model_raw(prompt: str, client: openai.OpenAI, max_tokens: int = 4096) -> tuple[str, str | None]:
+    """Like _call_model but returns raw text and finish_reason without parsing."""
+    response = client.chat.completions.create(
         model=CLUSTER_MODEL,
         max_tokens=max_tokens,
+        extra_body={"reasoning": {"effort": "low"}},
         messages=[{"role": "user", "content": prompt}],
     )
-    if response.stop_reason == "max_tokens":
+    if response.choices[0].finish_reason == "length":
         raise ValueError(
             f"Repair response hit max_tokens={max_tokens} and was truncated."
         )
-    return response.content[0].text, response.stop_reason
+    return _first_text(response), response.choices[0].finish_reason
 
 
-def _consolidate(pattern: str, batch_clusters: list[list[dict]], client: anthropic.Anthropic) -> list[dict]:
+def _consolidate(pattern: str, batch_clusters: list[list[dict]], client: openai.OpenAI) -> list[dict]:
     """
     Single-pass names-only consolidation. Strips all input clusters to name + 80-char
     description before sending — no hypotheses, no indices. Output is bounded at ~3k tokens
@@ -1019,7 +1039,7 @@ def _rebuild_indices(merged_clusters: list[dict], batch_clusters: list[list[dict
 def cluster_complaints(
     pattern: str,
     df,
-    client: anthropic.Anthropic = None,
+    client: openai.OpenAI = None,
     taxonomy_path: Path = None,
 ) -> list[dict]:
     """
@@ -1032,10 +1052,7 @@ def cluster_complaints(
         return _cluster_with_taxonomy(pattern, df, taxonomy, client)
 
     if client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_client()
 
     narratives = df["Consumer complaint narrative"].tolist()
     total = len(narratives)

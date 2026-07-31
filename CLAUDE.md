@@ -66,3 +66,15 @@ See global CLAUDE.md and shared_context.md for NPM install safety rules.
 ## Closeout state (2026-06-25)
 
 The taxonomy branch now includes scoring, PM brief rendering, and a committed demo brief. Treat extraction as frozen unless a concrete verification blocker appears. Closeout work should focus on packaging: reviewer-readable README, offline `unittest` coverage, stale duplicate cleanup, and accurate safety notes for CFPB-shaped bring-your-own data. `test_key.py` is a live Anthropic smoke test and should skip when `ANTHROPIC_API_KEY` is absent.
+
+## Provider swap — OpenRouter (2026-07-31)
+
+All four model call sites now go through OpenRouter instead of the Anthropic SDK directly. `src/llm_client.py` holds the one shared client constructor (`get_client()`), reading `OPENROUTER_API_KEY` and pointing the `openai` SDK at `https://openrouter.ai/api/v1`. This replaces the per-file `anthropic.Anthropic(api_key=...)` construction described in "Commands"/"Model constants" above.
+
+The "Model constants" table above is now stale: it lists pre-swap Anthropic-native model IDs. Current constants hold OpenRouter model slugs instead:
+- `ingest.py` `FILTER_MODEL` → `anthropic/claude-haiku-4.5`
+- `cluster.py` `CLUSTER_MODEL` → `anthropic/claude-sonnet-4.5`
+- `classify.py` `CLASSIFY_MODEL` → `anthropic/claude-haiku-4.5`
+- `narrate.py` `NARRATE_MODEL` → `anthropic/claude-sonnet-4.5`
+
+Response parsing also changed: OpenAI-style `response.choices[0].message.content` and `response.choices[0].finish_reason` (`"length"` on truncation) replace Anthropic's `response.content[0].text` / `response.stop_reason` (`"max_tokens"`). `test_key.py` is now a live OpenRouter smoke test and skips when `OPENROUTER_API_KEY` is absent.

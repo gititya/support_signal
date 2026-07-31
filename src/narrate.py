@@ -6,11 +6,12 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-import anthropic
+import openai
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from src.llm_client import get_client
 
-NARRATE_MODEL = "claude-sonnet-4-6"
+NARRATE_MODEL = "anthropic/claude-sonnet-4.5"
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 OUTPUT_DIR = Path(__file__).parent.parent / "output"
 TEMPLATE_NAME = "brief_pm.md.j2"
@@ -164,15 +165,15 @@ def _validate_narration(narration: dict) -> None:
             raise ValueError(f"Narration overclaimed with disallowed phrase: {phrase!r}")
 
 
-def _call_narration_model(prompt: str, client: anthropic.Anthropic) -> dict:
-    response = client.messages.create(
+def _call_narration_model(prompt: str, client: openai.OpenAI) -> dict:
+    response = client.chat.completions.create(
         model=NARRATE_MODEL,
         max_tokens=1200,
         messages=[{"role": "user", "content": prompt}],
     )
-    if response.stop_reason == "max_tokens":
+    if response.choices[0].finish_reason == "length":
         raise ValueError("Narration response was truncated.")
-    narration = _parse_model_json(response.content[0].text)
+    narration = _parse_model_json(response.choices[0].message.content)
     _validate_narration(narration)
     return narration
 
@@ -211,7 +212,7 @@ def generate_pm_brief(
     metadata: dict,
     signals: list[dict],
     df,
-    client: anthropic.Anthropic | None = None,
+    client: openai.OpenAI | None = None,
     output_path: Path | None = None,
 ) -> Path:
     if not signals:
@@ -219,10 +220,8 @@ def generate_pm_brief(
     _validate_hypotheses(signals)
 
     prepared_signals = _prepare_signals(signals, df)
-    if client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if api_key:
-            client = anthropic.Anthropic(api_key=api_key)
+    if client is None and os.environ.get("OPENROUTER_API_KEY"):
+        client = get_client()
 
     if client is None:
         narration = _fallback_narration(pattern, prepared_signals)

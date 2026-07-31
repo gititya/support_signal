@@ -3,10 +3,12 @@ import re
 import json
 from pathlib import Path
 
+import openai
 import pandas as pd
-import anthropic
 
-FILTER_MODEL = "claude-haiku-4-5-20251001"
+from src.llm_client import get_client
+
+FILTER_MODEL = "anthropic/claude-haiku-4.5"
 COMPANY = "TRANSUNION INTERMEDIATE HOLDINGS, INC."
 DATA_PATH = Path(__file__).parent.parent / "data" / "complaints.csv"
 CAP = 2000
@@ -49,7 +51,7 @@ def score_narrative(narrative: str, keywords: list) -> int:
     return sum(1 for kw in keywords if kw in narrative_lower)
 
 
-def _semantic_expand(pattern: str, narrative_df: pd.DataFrame, client: anthropic.Anthropic) -> pd.DataFrame:
+def _semantic_expand(pattern: str, narrative_df: pd.DataFrame, client: openai.OpenAI) -> pd.DataFrame:
     """
     When keyword match returns < SEMANTIC_THRESHOLD results, ask Haiku which
     narratives from the full company set are relevant to the pattern.
@@ -69,12 +71,12 @@ def _semantic_expand(pattern: str, narrative_df: pd.DataFrame, client: anthropic
         f"Complaints:\n{json.dumps(indexed, indent=2)}\n\n"
         f"Return ONLY a JSON array of integers, e.g. [0, 3, 7, ...]"
     )
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=FILTER_MODEL,
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     match = re.search(r'\[[\d,\s]*\]', raw)
     if not match:
         return pd.DataFrame()
@@ -139,11 +141,10 @@ def load_and_filter(pattern: str, data_path: Path = None) -> tuple:
             f"  Keyword match returned {after_keyword} results (< {SEMANTIC_THRESHOLD}). "
             f"Running semantic expansion via {FILTER_MODEL}..."
         )
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            raise EnvironmentError("OPENROUTER_API_KEY environment variable not set.")
         try:
-            client = anthropic.Anthropic(api_key=api_key)
+            client = get_client()
             expanded = _semantic_expand(pattern, narrative_df, client)
             if len(expanded) > 0:
                 keyword_df = (
@@ -153,9 +154,9 @@ def load_and_filter(pattern: str, data_path: Path = None) -> tuple:
                 )
                 after_keyword = len(keyword_df)
                 print(f"  [{after_keyword:,}] after semantic expansion")
-        except anthropic.AuthenticationError:
+        except openai.AuthenticationError:
             raise EnvironmentError(
-                "ANTHROPIC_API_KEY is set but invalid. "
+                "OPENROUTER_API_KEY is set but invalid. "
                 "Check that the key is correct and active."
             )
         except Exception as e:

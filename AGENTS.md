@@ -86,3 +86,15 @@ As of 2026-06-24, Adi's first pass on `output/theme_eval_taxonomy_signals.csv` l
 
 ## Install safety
 See global AGENTS.md and shared_context.md for NPM install safety rules.
+
+## Provider swap — OpenRouter (2026-07-31)
+
+All four model call sites now go through OpenRouter instead of the Anthropic SDK directly. `src/llm_client.py` holds the one shared client constructor (`get_client()`), reading `OPENROUTER_API_KEY` and pointing the `openai` SDK at `https://openrouter.ai/api/v1`.
+
+The "Model constants" table above is now stale: it lists pre-swap Anthropic-native model IDs. Current constants hold OpenRouter model slugs instead:
+- `ingest.py` `FILTER_MODEL` → `anthropic/claude-haiku-4.5`
+- `cluster.py` `CLUSTER_MODEL` → `anthropic/claude-sonnet-4.5`
+- `classify.py` `CLASSIFY_MODEL` → `anthropic/claude-haiku-4.5`
+- `narrate.py` `NARRATE_MODEL` → `anthropic/claude-sonnet-4.5`
+
+Response parsing also changed: OpenAI-style `response.choices[0].message.content` / `response.choices[0].finish_reason` (`"length"` on truncation) replace Anthropic's `response.content[0].text` / `response.stop_reason` (`"max_tokens"`). `test_key.py` is now a live OpenRouter smoke test and skips when `OPENROUTER_API_KEY` is absent.

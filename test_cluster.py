@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 sys.path.insert(0, "/Users/aditya/Documents/Projects/signal")
-sys.modules.setdefault("anthropic", SimpleNamespace(Anthropic=object))
+sys.modules.setdefault("openai", SimpleNamespace(OpenAI=object))
 
 from src.cluster import (  # noqa: E402
     _assign_cluster_ids,
@@ -210,8 +210,8 @@ other_bucket:
             }
         ])
 
-        class FakeContent:
-            text = __import__("json").dumps([
+        class FakeMessage:
+            content = __import__("json").dumps([
                 {
                     "idx": 0,
                     "bucket_index": 1,
@@ -219,15 +219,19 @@ other_bucket:
                 }
             ])
 
+        class FakeChoice:
+            finish_reason = "stop"
+            message = FakeMessage()
+
         class FakeResponse:
-            stop_reason = "end_turn"
-            content = [FakeContent()]
+            choices = [FakeChoice()]
 
         class FakeClient:
-            class messages:
-                @staticmethod
-                def create(**kwargs):
-                    return FakeResponse()
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**kwargs):
+                        return FakeResponse()
 
         buckets = _assign_evidence_buckets_with_model(
             "customers unable to dispute incorrect information on their credit report",
@@ -294,8 +298,8 @@ other_bucket:
                     }
                 })
 
-                class FakeContent:
-                    text = __import__("json").dumps([
+                class FakeMessage:
+                    content = __import__("json").dumps([
                         {
                             "idx": 1,
                             "bucket_index": 1,
@@ -303,18 +307,22 @@ other_bucket:
                         }
                     ])
 
+                class FakeChoice:
+                    finish_reason = "stop"
+                    message = FakeMessage()
+
                 class FakeResponse:
-                    stop_reason = "end_turn"
-                    content = [FakeContent()]
+                    choices = [FakeChoice()]
 
                 class FakeClient:
                     calls = 0
 
-                    class messages:
-                        @staticmethod
-                        def create(**kwargs):
-                            FakeClient.calls += 1
-                            return FakeResponse()
+                    class chat:
+                        class completions:
+                            @staticmethod
+                            def create(**kwargs):
+                                FakeClient.calls += 1
+                                return FakeResponse()
 
                 buckets = _assign_evidence_buckets_with_model(
                     pattern,
