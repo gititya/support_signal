@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 
 sys.path.insert(0, "/Users/aditya/Documents/Projects/signal")
-sys.modules.setdefault("anthropic", SimpleNamespace(Anthropic=object))
+sys.modules.setdefault("openai", SimpleNamespace(OpenAI=object))
 
 from src.classify import (  # noqa: E402
     CONFIDENCE,
@@ -86,18 +86,22 @@ class ClassifyValidationTests(unittest.TestCase):
         clusters = _make_clusters(3)
         result_data = _make_valid_result(3)
 
-        class FakeContent:
-            text = __import__("json").dumps(result_data)
+        class FakeMessage:
+            content = __import__("json").dumps(result_data)
+
+        class FakeChoice:
+            finish_reason = "stop"
+            message = FakeMessage()
 
         class FakeResponse:
-            stop_reason = "end_turn"
-            content = [FakeContent()]
+            choices = [FakeChoice()]
 
         class FakeClient:
-            class messages:
-                @staticmethod
-                def create(**kwargs):
-                    return FakeResponse()
+            class chat:
+                class completions:
+                    @staticmethod
+                    def create(**kwargs):
+                        return FakeResponse()
 
         classify_clusters(clusters, client=FakeClient())
 

@@ -1,12 +1,13 @@
-import os
 import json
 import re
 from pathlib import Path
 
-import anthropic
+import openai
 import yaml
 
-CLASSIFY_MODEL = "claude-haiku-4-5-20251001"
+from src.llm_client import get_client
+
+CLASSIFY_MODEL = "anthropic/claude-haiku-4.5"
 
 # Company-specific classification guidance lives in config/company_classification/<slug>.yaml.
 # Categories, definitions, and examples are tuned per company and apply across all sources
@@ -80,7 +81,7 @@ def _validate_classifications(result: list[dict], n: int, valid_types: set) -> N
             raise ValueError(f"Classification result for index {i} is missing rationale.")
 
 
-def classify_clusters(clusters: list[dict], company_slug: str = "transunion", client: anthropic.Anthropic = None) -> list[dict]:
+def classify_clusters(clusters: list[dict], company_slug: str = "transunion", client: openai.OpenAI = None) -> list[dict]:
     """
     Classify each cluster by signal type using company-specific category definitions.
     Loads category config from config/company_classification/<company_slug>.yaml.
@@ -102,23 +103,20 @@ def classify_clusters(clusters: list[dict], company_slug: str = "transunion", cl
     }
 
     if client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_client()
 
     print(f"  Classifying {len(clusters)} clusters via {CLASSIFY_MODEL} ({config['company']})...")
 
     prompt = _make_classify_prompt(clusters, categories)
-    response = client.messages.create(
+    response = client.chat.completions.create(
         model=CLASSIFY_MODEL,
         max_tokens=2048,
         messages=[{"role": "user", "content": prompt}],
     )
-    if response.stop_reason == "max_tokens":
+    if response.choices[0].finish_reason == "length":
         raise ValueError("Classification response was truncated (hit max_tokens).")
 
-    raw = response.content[0].text
+    raw = response.choices[0].message.content
     try:
         result = _parse_json(raw)
     except (json.JSONDecodeError, ValueError) as e:

@@ -1,11 +1,10 @@
 import csv
-import os
 from pathlib import Path
 
-import anthropic
 import pandas as pd
 
 from src.cluster import _assign_evidence_buckets_with_model, load_taxonomy
+from src.llm_client import get_client
 
 PATTERN = "customers unable to dispute incorrect information on their credit report"
 TAXONOMY_PATH = Path("config/taxonomy/transunion.yaml")
@@ -13,10 +12,6 @@ GOLDEN_PATH = Path("fixtures/golden_bucket_examples.csv")
 
 
 def main() -> int:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
-
     rows = list(csv.DictReader(GOLDEN_PATH.open(newline="", encoding="utf-8")))
     df = pd.DataFrame([
         {
@@ -28,7 +23,7 @@ def main() -> int:
     ])
 
     taxonomy = load_taxonomy(TAXONOMY_PATH)
-    client = anthropic.Anthropic(api_key=api_key)
+    client = get_client()
     buckets = _assign_evidence_buckets_with_model(PATTERN, df, taxonomy, client)
 
     assigned_by_idx = {}

@@ -1,11 +1,12 @@
 ---
-status: "in-progress"
-current_phase: "Signal taxonomy redesign review; initial generated output review looks good so far."
-next_action: "Proceed from trusted taxonomy/signal extraction into scoring and PM brief generation."
+status: "closeout done"
+current_phase: "Signal closeout: OpenRouter provider swap complete, docs updated, all branches merged clean into main."
+next_action: "None pending. Optional: fix pre-existing other_bucket_index KeyError in test_cluster.py (unrelated to this closeout)."
 things_to_know:
   - "Narrative complaint text should outrank metadata."
   - "Generated CSV/output files can be stale even when tests pass."
   - "Adi's first pass on the taxonomy signal export looked good so far."
+  - "LLM calls go through OpenRouter now (OPENROUTER_API_KEY), not the anthropic SDK directly."
 ---
 
 # Signal — Session State
@@ -102,3 +103,11 @@ Current closeout direction:
 - Keep offline verification on `unittest`; `pytest` is not a project dependency.
 - `test_key.py` is a live API smoke test and should skip cleanly when `ANTHROPIC_API_KEY` is absent.
 - The README is the front door for reviewers: lead with the generated brief, B2C/CFPB framing, the engineering log, the reusable engine/domain seam, and PII/API caveats for bring-your-own data.
+
+## Claude Code closeout — OpenRouter provider swap + branch cleanup (2026-07-31)
+
+Swapped all four Anthropic call sites (`src/ingest.py`, `src/cluster.py`, `src/classify.py`, `src/narrate.py`) plus `signal.py`, `eval_bucket_golden.py`, and `run_wispr_cluster.py` off the `anthropic` SDK and onto OpenRouter via a new shared `src/llm_client.py`. Env var is now `OPENROUTER_API_KEY`, not `ANTHROPIC_API_KEY`. `requirements.txt` swapped `anthropic` for `openai`. Model constants now hold OpenRouter slugs (`anthropic/claude-haiku-4.5`, `anthropic/claude-sonnet-4.5`) instead of Anthropic-native IDs — see the CLAUDE.md "Provider swap" section for the full mapping.
+
+Test mocks in `test_classify.py`, `test_cluster.py`, `test_narrate.py`, and `test_key.py` were updated to the OpenAI response shape (`response.choices[0].message.content` / `finish_reason`). All offline `unittest` suites pass except a pre-existing, unrelated failure: two tests in `test_cluster.py` (`test_model_assignment_can_override_bad_cfpb_metadata`, `test_model_assignment_resumes_from_partial_cache`) hit a `KeyError: 'other_bucket_index'` because their hand-built taxonomy dicts predate a fill-missing/catch-all-bucket feature that was already uncommitted in `src/cluster.py` before this session started. Not fixed — flagged for a separate pass.
+
+Branch review: `codex-signal-taxonomy-redesign` and `codex/signal-closeout` are both fully merged into `origin/main` already (via PR #2, merge commit `c56712d`). Nothing was left hanging. This session's OpenRouter swap + doc updates went in as new commits on `codex/signal-closeout` and were merged to `main` via a fresh PR.

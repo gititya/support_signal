@@ -20,14 +20,12 @@ if __name__ == "signal":
 
 if __name__ != "signal":
     import argparse
-    import os
-
-    import anthropic
 
     from eval_bucket_golden import main as run_golden_eval
     from src.classify import classify_clusters
     from src.cluster import cluster_complaints
     from src.ingest import load_and_filter
+    from src.llm_client import get_client
     from src.narrate import generate_pm_brief
     from src.score import score_signals
 
@@ -51,9 +49,6 @@ if __name__ != "signal":
 
     def main() -> int:
         args = _parse_args()
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise EnvironmentError("ANTHROPIC_API_KEY environment variable not set.")
 
         if not args.skip_golden:
             print("Running golden bucket eval before full brief generation...", flush=True)
@@ -62,7 +57,7 @@ if __name__ != "signal":
                 print("Golden bucket eval failed; stopping before full run.", flush=True)
                 return golden_result
 
-        client = anthropic.Anthropic(api_key=api_key)
+        client = get_client()
         df, metadata = load_and_filter(args.pattern)
         clusters = cluster_complaints(args.pattern, df, client=client, taxonomy_path=TAXONOMY_PATH)
         classify_clusters(clusters, client=client)
