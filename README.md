@@ -48,13 +48,13 @@ The reusable engine is segment-agnostic: corroborate against an independent list
 Use the project virtual environment:
 
 ```bash
-/Users/aditya/venvs/signal_venv/bin/python -m unittest discover -v
+/Users/aditya/venvs/support/bin/python -m unittest discover -v
 ```
 
 To run the live pipeline, set `OPENROUTER_API_KEY` and provide the CFPB complaints CSV at `data/complaints.csv`:
 
 ```bash
-/Users/aditya/venvs/signal_venv/bin/python signal.py
+/Users/aditya/venvs/support/bin/python signal.py
 ```
 
 The default pattern is:
@@ -66,7 +66,7 @@ customers unable to dispute incorrect information on their credit report
 You can pass another pattern:
 
 ```bash
-/Users/aditya/venvs/signal_venv/bin/python signal.py "customers receiving repeated identity theft denials"
+/Users/aditya/venvs/support/bin/python signal.py "customers receiving repeated identity theft denials"
 ```
 
 Live runs send complaint narratives to Claude models via OpenRouter. The offline unit tests do not require an API key; the live key smoke test skips when `OPENROUTER_API_KEY` is absent.
@@ -93,7 +93,7 @@ State
 To try your own CFPB-format data, place the CSV at `data/complaints.csv`, make sure `Company` contains `TRANSUNION INTERMEDIATE HOLDINGS, INC.` or update the company constant in `src/ingest.py`, then run:
 
 ```bash
-/Users/aditya/venvs/signal_venv/bin/python signal.py "customers unable to dispute incorrect information on their credit report"
+/Users/aditya/venvs/support/bin/python signal.py "customers unable to dispute incorrect information on their credit report"
 ```
 
 The `--company` option does not exist yet; company selection is currently a code constant. The free-text pattern controls which rows survive keyword filtering, and the taxonomy controls how matched narratives become evidence buckets. For non-CFPB support data, adapt the CSV into this contract or change `src/ingest.py`, then replace `config/taxonomy/transunion.yaml` with buckets that fit the new domain.

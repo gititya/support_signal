@@ -8,13 +8,13 @@ Signal is a CLI tool that takes a free-text support pattern description, filters
 ## Commands
 ```bash
 # Use the project venv when default python is missing dependencies
-/Users/aditya/venvs/signal_venv/bin/python -m pip install -r requirements.txt
+/Users/aditya/venvs/support/bin/python -m pip install -r requirements.txt
 
 # Run the tool
-/Users/aditya/venvs/signal_venv/bin/python signal.py
+/Users/aditya/venvs/support/bin/python signal.py
 
 # Run a single module test
-/Users/aditya/venvs/signal_venv/bin/python test_cluster.py   # or any test_*.py in project root
+/Users/aditya/venvs/support/bin/python test_cluster.py   # or any test_*.py in project root
 ```
 
 ## Architecture
@@ -79,7 +79,7 @@ Read-only validation on 2026-05-06 confirmed the CFPB taxonomy is strong enough 
 See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix, taxonomy assignment cache/resume behavior).
 
 ## Current eval gates
-Run `/Users/aditya/venvs/signal_venv/bin/python eval_bucket_golden.py` before the expensive taxonomy export when changing taxonomy prompts or bucket definitions. It checks known hard cases such as identity-theft blocking, cross-bureau inconsistency, improper report use, and investigation-not-fixed.
+Run `/Users/aditya/venvs/support/bin/python eval_bucket_golden.py` before the expensive taxonomy export when changing taxonomy prompts or bucket definitions. It checks known hard cases such as identity-theft blocking, cross-bureau inconsistency, improper report use, and investigation-not-fixed.
 
 ## Current review checkpoint
 As of 2026-06-24, Adi's first pass on `output/theme_eval_taxonomy_signals.csv` looked good so far. This is enough to continue building scoring and PM brief generation, but not a claim that every exported row has been exhaustively audited.
