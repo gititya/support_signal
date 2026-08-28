@@ -1,5 +1,5 @@
 ---
-status: "done"
+status: "shipped"
 current_state: "Signal closeout complete: README front door, offline tests, generated PM brief, and OpenRouter provider swap are all in main. Branches reviewed, nothing hanging."
 next_action: "None pending. Signal is not an active build; revisit only if a new brief/pattern is requested."
 things_to_know:
@@ -20,12 +20,12 @@ agent_notes:
   - "Generated CSV/output files can be stale even when tests pass."
   - "Review actual outputs before claiming taxonomy quality."
 safe_first_action: "Use the latest taxonomy output and golden eval before changing classification logic."
-updated_at: "2026-07-31"
-updated_by: "claude"
+updated_at: "2026-08-12"
+updated_by: "codex"
 ---
 
 ## Build inbox
 Free-write feature ideas, follow-ups, and "do this next" notes here. Keep coding-agent implementation detail in `SKILL.md`.
 
 - 2026-07-31: Closeout pass — swapped Anthropic SDK for OpenRouter across all four model call sites, updated CLAUDE.md/AGENTS.md/SKILL.md/README.md, confirmed `codex-signal-taxonomy-redesign` and `codex/signal-closeout` were both already fully merged into `origin/main`, and merged this session's changes to `main` via a clean PR.
-- Known open item (not fixed, unrelated to this closeout): `test_cluster.py` has two failing tests (`KeyError: 'other_bucket_index'`) — hand-built test taxonomy dicts predate a fill-missing/catch-all-bucket feature already present in `src/cluster.py`.
+- 2026-08-28: Public release prep per `signal-release-plan.md` — fixed the `other_bucket_index` KeyError noted below, removed hardcoded `/Users/aditya` paths from tests/AGENTS.md/README.md, deleted the Wispr taxonomy/script, rewrote README.md to match the voice-support-case-study house style, and flagged `signal-prd-v2.1.md` as stale with a preface note. All 51 offline tests pass; `test_key.py` skips without a key. Repo visibility flip to public is pending Adi's go-ahead.

@@ -1,6 +1,8 @@
 # Signal — PRD v2.1
 ## Support Signal → Corroborated Evidence → Product Action
 
+**Status note (2026-08-28):** This is the original design document, kept for history. The shipped pipeline diverged from it: free-form clustering (described below) was abandoned after three failure modes documented in [`docs/engineering-log.md`](docs/engineering-log.md) and replaced with the curated-taxonomy, buckets-first architecture described in [`README.md`](README.md). Multi-source corroboration (Phase 2/3 below) was never built; Phase 1 remains CFPB-only. Read the README for what the code actually does.
+
 **Purpose of this document**: Build spec for a personal portfolio project called Signal. Paste into Claude Code as persistent context. Every design decision encodes domain expertise from years of doing this workflow manually at McAfee. The output brief is the product.
 
 **What changed from v2**: Tightened Phase 1 scope (CFPB-only, Google Play moves to Phase 2). Reframed diagnostic reasoning as hypothesis generation, not diagnosis. Added "What This Is Not" to the brief template. Made competitive differentiation claims more honest. Added hallucination/overconfidence guardrails. Added README spec.

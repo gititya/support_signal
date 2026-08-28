@@ -1,8 +1,9 @@
 import sys
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 
-sys.path.insert(0, "/Users/aditya/Documents/Projects/signal")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.modules.setdefault("openai", SimpleNamespace(OpenAI=object))
 
 from src.classify import (  # noqa: E402

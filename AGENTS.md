@@ -7,14 +7,15 @@ Signal is a CLI tool that takes a free-text support pattern description, filters
 
 ## Commands
 ```bash
-# Use the project venv when default python is missing dependencies
-/Users/aditya/venvs/support/bin/python -m pip install -r requirements.txt
+# Create a venv and install dependencies
+python -m venv .venv && source .venv/bin/activate
+python -m pip install -r requirements.txt
 
 # Run the tool
-/Users/aditya/venvs/support/bin/python signal.py
+python signal.py
 
 # Run a single module test
-/Users/aditya/venvs/support/bin/python test_cluster.py   # or any test_*.py in project root
+python test_cluster.py   # or any test_*.py in project root
 ```
 
 ## Architecture
@@ -54,38 +55,6 @@ Never state root causes as facts.
 
 ## CSV column names (actual — differ from PRD notation)
 `Date received`, `Consumer complaint narrative`, `Company`, `Complaint ID`, `Product`, `Sub-product`, `Issue`, `Sub-issue`, `Company response to consumer`, `Timely response?`, `Consumer disputed?`, `State`
-
-## Current taxonomy redesign state
-`output/theme_eval.csv` was generated after clustering and classification. Adi reviewed `output/theme_eval - myfirstfeedback.csv` and added 98 feedback notes showing systematic theme and signal misclassification, including complaints tagged into the wrong theme and dispute complaints mislabeled as repeated/persistent behavior.
-
-Claude wrote `/Users/aditya/.claude/plans/eager-puzzling-puppy.md`, then revised that plan in `/Users/aditya/.claude/projects/-Users-aditya-Documents-Projects-signal/memory/project_taxonomy_redesign.md` after adversarial review. Treat the revised memory as the active handoff until this section is updated again.
-
-Do not implement the original hybrid plan as written. The active direction is:
-- Use CFPB `Issue` + `Sub-issue` as the evidence-bucket grounding layer, not as the final product insight.
-- Mine taxonomy from the full TransUnion company dataset, not only the current pattern-filtered subset.
-- Require a curated company-level taxonomy file; do not silently fall back to free clustering when it is missing.
-- Assign complaints to curated evidence buckets using narrative-first model classification. CFPB `Issue` + `Sub-issue` is a hint, not the source of truth, because CFPB rows can be misfiled.
-- Do not let the model invent buckets. It must choose from the curated taxonomy plus `Other/Unclassified`.
-- Use row-level assignment rationales so incorrect bucket placement is auditable in `output/theme_eval_taxonomy_signals.csv`.
-- Generate PM-facing signals from narratives inside each populated evidence bucket. Signals must be more useful than raw CFPB labels.
-- Keep LLM value focused on narrative-first bucket assignment, signal synthesis, and hypothesis generation. CFPB metadata is only grounding context.
-- Keep classification after evidence assembly and signal synthesis.
-
-Read-only validation on 2026-05-06 confirmed the CFPB taxonomy is strong enough to anchor themes: full TransUnion top 8 Issue/Sub-issue combinations cover 91.5% of rows, top 10 cover 94.3%, and top 12 cover 95.9%. The current dispute-pattern reproduction showed top 8 coverage of 92.8%, top 10 of 95.1%, and top 15 of 98.1%.
-
----
-
-## Incidents and architectural decisions
-See `docs/engineering-log.md` for full incident history (consolidation token failures, cluster identity bug fix, taxonomy assignment cache/resume behavior).
-
-## Current eval gates
-Run `/Users/aditya/venvs/support/bin/python eval_bucket_golden.py` before the expensive taxonomy export when changing taxonomy prompts or bucket definitions. It checks known hard cases such as identity-theft blocking, cross-bureau inconsistency, improper report use, and investigation-not-fixed.
-
-## Current review checkpoint
-As of 2026-06-24, Adi's first pass on `output/theme_eval_taxonomy_signals.csv` looked good so far. This is enough to continue building scoring and PM brief generation, but not a claim that every exported row has been exhaustively audited.
-
-## Install safety
-See global AGENTS.md and shared_context.md for NPM install safety rules.
 
 ## Provider swap — OpenRouter (2026-07-31)
 

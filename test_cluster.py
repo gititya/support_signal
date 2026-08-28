@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-sys.path.insert(0, "/Users/aditya/Documents/Projects/signal")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.modules.setdefault("openai", SimpleNamespace(OpenAI=object))
 
 from src.cluster import (  # noqa: E402
@@ -198,6 +198,7 @@ other_bucket:
                     "is_other": True,
                 },
             ],
+            "other_bucket_index": 2,
         }
         df = pd.DataFrame([
             {
@@ -267,6 +268,7 @@ other_bucket:
                         "is_other": True,
                     },
                 ],
+                "other_bucket_index": 2,
             }
             df = pd.DataFrame([
                 {
