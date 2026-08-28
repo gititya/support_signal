@@ -6,9 +6,9 @@ Demo brief, no key required: [`output/pm_brief_customers-unable-to-dispute-incor
 
 ## The problem
 
-Support data carries early product evidence, but it arrives as narratives and repeated complaints, not analytics. Most attempts to mine it produce a confident theme list a PM cannot act on and cannot check: the themes are plausible, but there is no way to see why a given complaint landed in a given theme, or to trust that the model did not just invent the theme to fit its own summary.
+Support data carries early product evidence, but it arrives as narratives, not analytics. Most attempts to mine it produce a confident theme list a PM cannot act on and cannot check: the themes look plausible, but nobody can see why a given complaint landed in a given theme.
 
-I built Signal to do the narrower, checkable version of that job for one domain: TransUnion credit-report disputes, sourced from the public CFPB complaint database.
+I built Signal to do the narrower, checkable version of that job for one domain: TransUnion credit-report disputes, from the public CFPB complaint database.
 
 ## What it does
 
@@ -31,17 +31,17 @@ The engine (`src/ingest.py` through `src/narrate.py`) is domain-agnostic; only t
 ## What I decided and why
 
 1. **Buckets before signals.** A curated taxonomy assigns evidence into named buckets; the model only synthesises a signal within a bucket that already has complaints in it. Cost: the taxonomy is hand-written per domain, so a new domain is real work up front.
-2. **Free-form clustering was abandoned after it failed three ways.** A single consolidation call hit the token ceiling on 216 clusters. Recursive merging never converged within a bounded depth. Name-based matching between merge passes scrambled complaint indices — two clusters with the same name in different batches silently merged or dropped. Full detail in [`docs/engineering-log.md`](docs/engineering-log.md). Cost: bucket assignment is less automatic, and it will not discover a theme nobody put in the taxonomy.
-3. **Severity scoring is deterministic, not model-judged.** It is a rules function, not a prompt: same inputs produce the same score, and the rationale string states exactly which rule fired. Cost: it cannot weigh a signal that the rules do not encode.
-4. **Single-source findings are labelled directional, and the brief carries a "what this is not" section.** Cost: the output is less quotable. That is the point — the fastest way to lose Product's trust is one confident number that turns out to be wrong.
+2. **Free-form clustering was abandoned after it failed three ways.** A single consolidation call hit the token ceiling on 216 clusters. Recursive merging never converged. Name-based matching between merge passes scrambled complaint indices. Full detail in [`docs/engineering-log.md`](docs/engineering-log.md). Cost: bucket assignment is less automatic, and it will not discover a theme nobody put in the taxonomy.
+3. **Severity scoring is deterministic, not model-judged.** Same inputs, same score, and the rationale string states which rule fired. Cost: it cannot weigh a signal the rules do not encode.
+4. **Single-source findings are labelled directional, and the brief carries a "what this is not" section.** Cost: the output is less quotable. That is the point — the fastest way to lose Product's trust is one confident number that turns out wrong.
 
 ## Evaluation
 
 | What I tested | What happened |
 |---|---|
-| Bucket assignment against golden hard cases (`eval_bucket_golden.py`) | Checks known-hard rows — identity-theft blocking, cross-bureau inconsistency, improper report use, investigation-not-fixed — against `fixtures/golden_bucket_examples.csv` and fails if any assignment drifts from the expected bucket. |
-| Offline unit suite (`python -m unittest discover`) | 51 tests covering ingest filtering, cluster ID assignment and validation, taxonomy loading, classification validation, scoring, and brief rendering. No API key required. |
-| Live run behind the committed brief | 2,000 CFPB complaints, Dec 2025 – Mar 2026, TransUnion. Five signals covering 1,531 of the 2,000 complaints; the top bucket (Investigation Did Not Fix Error) carried 556. |
+| Bucket assignment against golden hard cases (`eval_bucket_golden.py`) | Checks known-hard rows — identity-theft blocking, cross-bureau inconsistency, improper report use, investigation-not-fixed — against `fixtures/golden_bucket_examples.csv`. Fails on any drift from the expected bucket. |
+| Offline unit suite (`python -m unittest discover`) | 52 tests, no API key required: ingest filtering, cluster ID assignment and validation, taxonomy loading, classification, scoring, brief rendering. |
+| Live run behind the committed brief | 2,000 CFPB complaints, Dec 2025 – Mar 2026, TransUnion. Five signals covering 1,531 of the 2,000 complaints; top bucket (Investigation Did Not Fix Error) carried 556. |
 
 There is no ground truth for signal quality — nothing checks whether the synthesised PM signal is the right read of a bucket's complaints. Bucket assignment is the only stage with an evaluation gate.
 
@@ -73,7 +73,7 @@ Date received, Consumer complaint narrative, Company, Complaint ID, Product, Sub
 Issue, Sub-issue, Company response to consumer, Timely response?, Consumer disputed?, State
 ```
 
-Place the CSV at `data/complaints.csv`, make sure `Company` matches the value checked in `src/ingest.py` (or edit that constant), and replace `config/taxonomy/transunion.yaml` with a curated bucket list for the new domain. Do not commit real customer support data — the repo ignores `data/`, generated `output/` files, `.env*`, and common credential file patterns.
+Place the CSV at `data/complaints.csv`, match `Company` to the value checked in `src/ingest.py` (or edit that constant), and replace `config/taxonomy/transunion.yaml` with a curated bucket list for the new domain. Do not commit real support data — the repo ignores `data/`, `output/`, `.env*`, and common credential file patterns.
 
 ## Known limitations
 
@@ -85,7 +85,7 @@ Place the CSV at `data/complaints.csv`, make sure `Company` matches the value ch
 
 ## Where this goes next
 
-Complaint narratives alone tell you who complained, not how many were affected. The version that changes a product decision joins them to a denominator and to product telemetry. I built that by hand at McAfee: normalising support contacts against active subscribers to get a contact rate around 0.5–0.6%, then joining product events to those contacts in Databricks to see which alerted customers acted on their own and which called anyway, and why. Signal is the narrative half of that method; the join is the next phase.
+Complaint narratives tell you who complained, not how many were affected. The version that changes a product decision joins them to a denominator and to product telemetry — I built that by hand at McAfee, normalising support contacts against active subscribers and joining product events to them in Databricks. Signal is the narrative half; the join is next.
 
 ## Copyright
 

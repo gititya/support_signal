@@ -1,16 +1,26 @@
-import sys; sys.path.insert(0, ".")
-from src.ingest import load_and_filter
+import sys
+import unittest
+from pathlib import Path
 
-print("=== Test 1 ===")
-df, meta = load_and_filter("customers unable to dispute incorrect information on their credit report")
-print(f"\nMetadata: {meta}\n")
-for _, row in df.head(3).iterrows():
-    date = row['Date received']
-    print(f"[{date}] {row['Issue']}")
-    print(f"  {str(row['Consumer complaint narrative'])[:200]}\n")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-print("=== Test 2 ===")
-try:                                                                                                      
-      load_and_filter("customers complaining about airline baggage fees")
-except (ValueError, EnvironmentError) as e:                                                               
-      print(f"Clean error (no traceback): {e}")
+from src.ingest import DATA_PATH, load_and_filter  # noqa: E402
+
+
+class LoadAndFilterLiveDataTest(unittest.TestCase):
+    def test_load_and_filter_against_real_csv(self):
+        if not DATA_PATH.exists():
+            self.skipTest(f"{DATA_PATH} not present; skipping live-data test.")
+
+        df, meta = load_and_filter(
+            "customers unable to dispute incorrect information on their credit report"
+        )
+        self.assertGreater(len(df), 0)
+        self.assertIn("Consumer complaint narrative", df.columns)
+
+        with self.assertRaises((ValueError, EnvironmentError)):
+            load_and_filter("customers complaining about airline baggage fees")
+
+
+if __name__ == "__main__":
+    unittest.main()
