@@ -1,5 +1,7 @@
 # Signal
 
+**Free-form clustering of complaints failed three ways before I gave the model a fixed set of buckets and made it write only inside them. The brief carries a "what this is not" section on purpose.**
+
 Signal turns public CFPB complaint narratives into a PM-ready brief about a recurring customer support pattern.
 
 Demo brief, no key required: [`output/pm_brief_customers-unable-to-dispute-incorrect-information-on-their-c_20260624-222400.md`](output/pm_brief_customers-unable-to-dispute-incorrect-information-on-their-c_20260624-222400.md)
@@ -19,7 +21,7 @@ I built Signal to do the narrower, checkable version of that job for one domain:
 5. `src/score.py` applies deterministic severity scoring — same inputs, same score, every time.
 6. `src/narrate.py` renders the PM brief from `templates/brief_pm.md.j2`.
 
-The engine (`src/ingest.py` through `src/narrate.py`) is domain-agnostic; only the CFPB CSV and `config/taxonomy/transunion.yaml` are TransUnion-specific, so a new domain means a new source and a new taxonomy file, not a new pipeline.
+Only one domain has been run: TransUnion credit-report disputes from a CFPB CSV. The pipeline shape may be reusable, but a new domain would need a new source, taxonomy, configuration, and validation; this repo does not prove that transfer.
 
 | Constant | File | Model (via OpenRouter) |
 |---|---|---|
@@ -41,7 +43,7 @@ The engine (`src/ingest.py` through `src/narrate.py`) is domain-agnostic; only t
 |---|---|
 | Bucket assignment against golden hard cases (`eval_bucket_golden.py`) | Checks known-hard rows — identity-theft blocking, cross-bureau inconsistency, improper report use, investigation-not-fixed — against `fixtures/golden_bucket_examples.csv`. Fails on any drift from the expected bucket. |
 | Offline unit suite (`python -m unittest discover`) | 52 tests, no API key required: ingest filtering, cluster ID assignment and validation, taxonomy loading, classification, scoring, brief rendering. |
-| Live run behind the committed brief | 2,000 CFPB complaints, Dec 2025 – Mar 2026, TransUnion. Five signals covering 1,531 of the 2,000 complaints; top bucket (Investigation Did Not Fix Error) carried 556. |
+| Saved run behind the committed brief | 2,000 CFPB complaints, Dec 2025 – Mar 2026, TransUnion. Five signals covering 1,531 of the 2,000 complaints; top bucket (Investigation Did Not Fix Error) carried 556. |
 
 There is no ground truth for signal quality — nothing checks whether the synthesised PM signal is the right read of a bucket's complaints. Bucket assignment is the only stage with an evaluation gate.
 
@@ -55,10 +57,10 @@ python -m pip install -r requirements.txt
 python -m unittest discover -v
 ```
 
-Live, with an OpenRouter key and a CFPB CSV at `data/complaints.csv`:
+Model-backed, with an OpenRouter key and a CFPB CSV at `data/complaints.csv`:
 
 ```bash
-export OPENROUTER_API_KEY=sk-or-...
+export OPENROUTER_API_KEY
 python signal.py "customers unable to dispute incorrect information on their credit report"
 ```
 
@@ -83,9 +85,9 @@ Place the CSV at `data/complaints.csv`, match `Company` to the value checked in 
 4. The taxonomy is hand-written per company and does not transfer to a new domain without new work.
 5. No claim about total affected users or proof of root cause. Hypotheses are framed as hypotheses, not findings.
 
-## Where this goes next
+## What would be needed to go further
 
-Complaint narratives tell you who complained, not how many were affected. The version that changes a product decision joins them to a denominator and to product telemetry — I built that by hand at McAfee, normalising support contacts against active subscribers and joining product events to them in Databricks. Signal is the narrative half; the join is next.
+Complaint narratives tell you who complained, not how many were affected. A stronger version would need a customer denominator and product evidence. Signal stops at the narrative half; no further build is planned in this portfolio pass.
 
 ## Copyright
 
